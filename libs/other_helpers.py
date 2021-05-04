@@ -75,24 +75,31 @@ def plot_dir(r):
     ax.set_zlabel('Z Label')
 
 
-def get_transform_matrix(lookfrom, lookat, vup):
-    lookfrom = np.array(lookfrom)
+def get_transform_matrix(eye, center, up, final_r=4):
+    # Renormalizing the camera position first
+    eye = np.array(eye)
+    r = np.linalg.norm(eye, axis=-1)
+    eye = eye / r * final_r
 
-    zaxis = unit_vector_np(lookat - lookfrom, axis=0)
-    xaxis = unit_vector_np(np.cross(vup, zaxis), axis=0)
+    zaxis = unit_vector_np(eye - center)
+    xaxis = unit_vector_np(np.cross(up, zaxis))
     yaxis = np.cross(zaxis, xaxis)
-    transform_matrix = np.zeros((4, 4))
+
+    transform_matrix = np.eye(4)
     transform_matrix[:-1, 0] = xaxis
     transform_matrix[:-1, 1] = yaxis
     transform_matrix[:-1, 2] = zaxis
-    transform_matrix[-1, 0] = np.dot(xaxis, lookfrom)
-    transform_matrix[-1, 1] = np.dot(yaxis, lookfrom)
-    transform_matrix[-1, 2] = np.dot(zaxis, lookfrom)
-    transform_matrix[-1, -1] = 1
+    transform_matrix[:-1, 3] = eye
+    return transform_matrix
 
-    return transform_matrix.T
 
 def unison_shuffled_copies(a, b):
     assert len(a) == len(b)
     p = np.random.permutation(len(a))
     return a[p], b[p]
+
+if __name__ == '__main__':
+    eye = np.array((-4., -4.0, -0.5))
+    center = np.array((0, 0, 0))
+    up = np.array((0, 0, 1))
+    print(get_transform_matrix(eye, center, up))
