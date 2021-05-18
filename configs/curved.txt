@@ -1,6 +1,6 @@
-expname = spheres_generated
+expname = spheres_generated # This has the same name as the straight experiment
 basedir = ./logs
-datadir = ./data/straight
+datadir = ./data/curved
 dataset_type = blender
 
 no_batching = True

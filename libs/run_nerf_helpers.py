@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import os
 
 torch.autograd.set_detect_anomaly(True)
 
@@ -241,3 +242,50 @@ def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
     samples = bins_g[..., 0] + t * (bins_g[..., 1] - bins_g[..., 0])
 
     return samples
+
+
+def make_batch_rays(rays_o, rays_d, z_vals):
+    '''
+
+    :param rays_o: [N_rays, 3] Ray origins
+    :param rays_d: [N_rays, 3] Ray directions
+    :param z_vals: [N_rays, N_samples] Positions to calculate
+    :return:
+    '''
+    N_rays, N_samples = z_vals.shape
+
+    b = torch.cat((rays_o, rays_d), dim=-1).unsqueeze(1)
+    b = b.expand(N_rays, N_samples, 6)
+    b = torch.cat((b, z_vals.unsqueeze(-1)), dim=-1)
+
+    return b
+
+
+def load_ckpt(optimizer, model, model_fine, args, basedir, expname, curved=False, model_curve=None):
+    if args.ft_path is not None and args.ft_path != 'None':
+        ckpts = [args.ft_path]
+    else:
+        ckpts = [os.path.join(basedir, expname, f) for f in sorted(os.listdir(os.path.join(basedir, expname))) if
+                 'tar' in f]
+    start = 0
+    print('Found ckpts', ckpts)
+    if len(ckpts) > 0 and not args.no_reload:
+        ckpt_path = ckpts[-1]
+        print('Reloading from', ckpt_path)
+        ckpt = torch.load(ckpt_path)
+
+        start = ckpt['global_step']
+        if curved:
+            assert model_curve is not None, 'Model cannot be none'
+            model_curve.load_state_dict(ckpt['curver'])
+            optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+
+        # Load model
+        model.load_state_dict(ckpt['network_fn_state_dict'])
+        if model_fine is not None:
+            model_fine.load_state_dict(ckpt['network_fine_state_dict'])
+
+    if curved:
+        return model, model_fine, optimizer, start, model_curve
+    else:
+        return model, model_fine, optimizer, start

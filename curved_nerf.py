@@ -1,8 +1,11 @@
 import os
 import imageio
 import time
+
+import torch
 from tqdm import tqdm, trange
 
+from libs.curve_rays import CurveModel
 from libs.run_nerf_helpers import *
 
 from loaders.load_llff import load_llff_data
@@ -60,8 +63,7 @@ def batchify_rays(rays_flat, chunk=1024 * 32, **kwargs):
 
 
 def render(H, W, focal, chunk=1024 * 32, rays=None, c2w=None, ndc=True,
-           near=0., far=1.,
-           use_viewdirs=False, c2w_staticcam=None,
+           near=0., far=1., use_viewdirs=False, c2w_staticcam=None,
            **kwargs):
     """Render rays
     Args:
@@ -194,35 +196,45 @@ def create_nerf(args):
                                                                         embeddirs_fn=embeddirs_fn,
                                                                         netchunk=args.netchunk)
 
+    curver = CurveModel()
+    curver.load_state_dict(torch.load(args.c_path))
+    curver.to(device)
+    grad_vars += list(curver.parameters())
+
     # Create optimizer
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
 
     start = 0
     basedir = args.basedir
-    expname = args.expname
+    expname = args.expname + '_curved'
 
     ##########################
 
-    # Load checkpoints
-    if args.ft_path is not None and args.ft_path != 'None':
-        ckpts = [args.ft_path]
-    else:
-        ckpts = [os.path.join(basedir, expname, f) for f in sorted(os.listdir(os.path.join(basedir, expname))) if
-                 'tar' in f]
+    # Load checkpoints from straight rays
+    # if args.ft_path is not None and args.ft_path != 'None':
+    #     ckpts = [args.ft_path]
+    # else:
+    #     ckpts = [os.path.join(basedir, expname, f) for f in sorted(os.listdir(os.path.join(basedir, expname))) if
+    #              'tar' in f]
+    #
+    # print('Found ckpts', ckpts)
+    # if len(ckpts) > 0 and not args.no_reload:
+    #     ckpt_path = ckpts[-1]
+    #     print('Reloading from', ckpt_path)
+    #     ckpt = torch.load(ckpt_path)
+    #
+    #     start = ckpt['global_step']
+    #     optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+    #
+    #     # Load model
+    #     model.load_state_dict(ckpt['network_fn_state_dict'])
+    #     if model_fine is not None:
+    #         model_fine.load_state_dict(ckpt['network_fine_state_dict'])
 
-    print('Found ckpts', ckpts)
-    if len(ckpts) > 0 and not args.no_reload:
-        ckpt_path = ckpts[-1]
-        print('Reloading from', ckpt_path)
-        ckpt = torch.load(ckpt_path)
+    model, model_fine, optimizer, start = load_ckpt(optimizer, model, model_fine, args, basedir, args.expname)
+    model, model_fine, optimizer, start, curver = load_ckpt(optimizer, model, model_fine, args, basedir, expname, curved=True, model_curve=curver)
 
-        start = ckpt['global_step']
-        optimizer.load_state_dict(ckpt['optimizer_state_dict'])
-
-        # Load model
-        model.load_state_dict(ckpt['network_fn_state_dict'])
-        if model_fine is not None:
-            model_fine.load_state_dict(ckpt['network_fine_state_dict'])
+    # Load checkpoints from previous curved rays
 
     ##########################
 
@@ -236,6 +248,7 @@ def create_nerf(args):
         'use_viewdirs': args.use_viewdirs,
         'white_bkgd': args.white_bkgd,
         'raw_noise_std': args.raw_noise_std,
+        'curver': curver
     }
 
     # NDC only good for LLFF-style forward facing data
@@ -301,6 +314,7 @@ def render_rays(ray_batch,
                 network_fn,
                 network_query_fn,
                 N_samples,
+                curver,
                 retraw=False,
                 lindisp=False,
                 perturb=0.,
@@ -362,20 +376,11 @@ def render_rays(ray_batch,
         # stratified samples in those intervals
         t_rand = torch.rand(z_vals.shape)
 
-        # Pytest, overwrite u with numpy's fixed random numbers
-        if pytest:
-            np.random.seed(0)
-            t_rand = np.random.rand(*list(z_vals.shape))
-            t_rand = torch.Tensor(t_rand)
-
         z_vals = lower + (upper - lower) * t_rand
 
-    #############################################################
-    ##################### THIS IS THE POINT #####################
-    #############################################################
-    pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]  # [N_rays, N_samples, 3]
+    input_batch = make_batch_rays(rays_o, rays_d, z_vals).to(device)
+    pts = curver(input_batch)
 
-    #     raw = run_network(pts)
     raw = network_query_fn(pts, viewdirs, network_fn)
     rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd,
                                                                  pytest=pytest)
@@ -392,7 +397,6 @@ def render_rays(ray_batch,
                                                             None]  # [N_rays, N_samples + N_importance, 3]
 
         run_fn = network_fn if network_fine is None else network_fine
-        #         raw = run_network(pts, fn=run_fn)
         raw = network_query_fn(pts, viewdirs, run_fn)
 
         rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd,
@@ -451,6 +455,8 @@ def config_parser():
                         help='do not reload weights from saved ckpt')
     parser.add_argument("--ft_path", type=str, default=None,
                         help='specific weights npy file to reload for coarse network')
+    parser.add_argument('--c_path', type=str, default='models/straight_model.pth',
+                        help='Curver model path')
 
     # rendering options
     parser.add_argument("--N_samples", type=int, default=64,
@@ -613,7 +619,7 @@ def train():
 
     # Create log dir and copy the config file
     basedir = args.basedir
-    expname = args.expname
+    expname = args.expname + '_curved'
     os.makedirs(os.path.join(basedir, expname), exist_ok=True)
     f = os.path.join(basedir, expname, 'args.txt')
     with open(f, 'w') as file:
@@ -777,7 +783,8 @@ def train():
             torch.save({'global_step': global_step,
                 'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
                 'network_fine_state_dict': render_kwargs_train['network_fine'].state_dict(),
-                'optimizer_state_dict': optimizer.state_dict()}, path)
+                'optimizer_state_dict': optimizer.state_dict(), 'curver': render_kwargs_train['curver'].state_dict()},
+                       path)
             print('Saved checkpoints at', path)
 
         if i % args.i_video == 0 and i > 0:
