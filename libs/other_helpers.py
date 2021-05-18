@@ -20,6 +20,16 @@ def unit_vector(a, dim=None):
 def unit_vector_np(a, axis=None):
     return a / np.linalg.norm(a, axis=axis)[..., np.newaxis]
 
+def random_on_unit_sphere(size, device='cpu'):
+    # We use the method in https://stats.stackexchange.com/questions/7977/how-to-generate-uniformly-distributed-points-on-the-surface-of-the-3-d-unit-sphe
+    # to produce vectors on the surface of a unit sphere
+
+    x = torch.randn(size)
+    l = torch.sqrt(torch.sum(torch.pow(x, 2), dim=-1)).unsqueeze(1)
+    x = (x / l).to(device)
+
+    return x
+
 
 def degrees_to_radians(d):
     if type(d) == str:

@@ -370,6 +370,9 @@ def render_rays(ray_batch,
 
         z_vals = lower + (upper - lower) * t_rand
 
+    #############################################################
+    ##################### THIS IS THE POINT #####################
+    #############################################################
     pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]  # [N_rays, N_samples, 3]
 
     #     raw = run_network(pts)
