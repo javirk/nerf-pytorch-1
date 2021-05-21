@@ -692,7 +692,7 @@ def train():
     print('VAL views are', i_val)
 
     start = start + 1
-    for i in trange(start, N_iters):
+    for i in trange(start, N_iters + start):
         time0 = time.time()
 
         # Sample random ray batch

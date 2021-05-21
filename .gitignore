@@ -10,3 +10,4 @@ logs/*
 *.sh
 test.py
 .idea
+*.pth
