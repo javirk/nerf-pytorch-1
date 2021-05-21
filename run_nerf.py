@@ -422,6 +422,8 @@ def config_parser():
                         help='where to store ckpts and logs')
     parser.add_argument("--datadir", type=str, default='./data/straight_all',
                         help='input data directory')
+    parser.add_argument('--previous_training', type=str,
+                        help='Previous training path')
 
     # training options
     parser.add_argument("--netdepth", type=int, default=8,
@@ -448,6 +450,10 @@ def config_parser():
                         help='do not reload weights from saved ckpt')
     parser.add_argument("--ft_path", type=str, default=None,
                         help='specific weights npy file to reload for coarse network')
+    parser.add_argument('--c_path', type=str, default='models/straight_model.pth',
+                        help='Curver model path')
+    parser.add_argument('--freeze_nerf', action='store_true',
+                        help='Freeze the NeRF architecture')
 
     # rendering options
     parser.add_argument("--N_samples", type=int, default=64,
