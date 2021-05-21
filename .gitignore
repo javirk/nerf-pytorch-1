@@ -8,3 +8,4 @@
 data/*
 logs/*
 *.sh
+test.py

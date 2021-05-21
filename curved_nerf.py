@@ -179,17 +179,26 @@ def create_nerf(args):
         embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed)
     output_ch = 5 if args.N_importance > 0 else 4
     skips = [4]
+    grad_vars = list()
+
     model = NeRF(D=args.netdepth, W=args.netwidth,
                  input_ch=input_ch, output_ch=output_ch, skips=skips,
                  input_ch_views=input_ch_views, use_viewdirs=args.use_viewdirs).to(device)
-    grad_vars = list(model.parameters())
+
+    if not args.freeze_nerf:
+        grad_vars = list(model.parameters())
+    else:
+        model.requires_grad_(False)
 
     model_fine = None
     if args.N_importance > 0:
         model_fine = NeRF(D=args.netdepth_fine, W=args.netwidth_fine,
                           input_ch=input_ch, output_ch=output_ch, skips=skips,
                           input_ch_views=input_ch_views, use_viewdirs=args.use_viewdirs).to(device)
-        grad_vars += list(model_fine.parameters())
+        if not args.freeze_nerf:
+            grad_vars += list(model_fine.parameters())
+        else:
+            model_fine.requires_grad_(False)
 
     network_query_fn = lambda inputs, viewdirs, network_fn: run_network(inputs, viewdirs, network_fn,
                                                                         embed_fn=embed_fn,
@@ -210,28 +219,7 @@ def create_nerf(args):
 
     ##########################
 
-    # Load checkpoints from straight rays
-    # if args.ft_path is not None and args.ft_path != 'None':
-    #     ckpts = [args.ft_path]
-    # else:
-    #     ckpts = [os.path.join(basedir, expname, f) for f in sorted(os.listdir(os.path.join(basedir, expname))) if
-    #              'tar' in f]
-    #
-    # print('Found ckpts', ckpts)
-    # if len(ckpts) > 0 and not args.no_reload:
-    #     ckpt_path = ckpts[-1]
-    #     print('Reloading from', ckpt_path)
-    #     ckpt = torch.load(ckpt_path)
-    #
-    #     start = ckpt['global_step']
-    #     optimizer.load_state_dict(ckpt['optimizer_state_dict'])
-    #
-    #     # Load model
-    #     model.load_state_dict(ckpt['network_fn_state_dict'])
-    #     if model_fine is not None:
-    #         model_fine.load_state_dict(ckpt['network_fine_state_dict'])
-
-    model, model_fine, optimizer, start = load_ckpt(optimizer, model, model_fine, args, basedir, args.expname)
+    model, model_fine, optimizer, start = load_ckpt(optimizer, model, model_fine, args, basedir, args.previous_training)
     model, model_fine, optimizer, start, curver = load_ckpt(optimizer, model, model_fine, args, basedir, expname, curved=True, model_curve=curver)
 
     # Load checkpoints from previous curved rays
@@ -429,6 +417,8 @@ def config_parser():
                         help='where to store ckpts and logs')
     parser.add_argument("--datadir", type=str, default='./data/straight_all',
                         help='input data directory')
+    parser.add_argument('--previous_training', type=str,
+                        help='Previous training path')
 
     # training options
     parser.add_argument("--netdepth", type=int, default=8,
@@ -457,6 +447,8 @@ def config_parser():
                         help='specific weights npy file to reload for coarse network')
     parser.add_argument('--c_path', type=str, default='models/straight_model.pth',
                         help='Curver model path')
+    parser.add_argument('--freeze_nerf', action='store_true',
+                        help='Freeze the NeRF architecture')
 
     # rendering options
     parser.add_argument("--N_samples", type=int, default=64,
@@ -752,14 +744,12 @@ def train():
 
         optimizer.zero_grad()
         img_loss = img2mse(rgb, target_s)
-        trans = extras['raw'][..., -1]
         loss = img_loss
         psnr = mse2psnr(img_loss)
 
         if 'rgb0' in extras:
             img_loss0 = img2mse(extras['rgb0'], target_s)
             loss = loss + img_loss0
-            psnr0 = mse2psnr(img_loss0)
 
         loss.backward()
         optimizer.step()

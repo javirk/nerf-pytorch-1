@@ -1,11 +1,11 @@
-expname = spheres_generated
+expname = spheres_generated_freeze
 basedir = ./logs
 datadir = ./data/curved
 dataset_type = blender
 previous_training = spheres_generated
 
 no_batching = True
-freeze_nerf = False
+freeze_nerf = True
 
 use_viewdirs = True
 white_bkgd = True
