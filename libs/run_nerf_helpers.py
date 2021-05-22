@@ -263,11 +263,14 @@ def make_batch_rays(rays_o, rays_d, z_vals):
 
 
 def load_ckpt(optimizer, model, model_fine, args, basedir, expname, curved=False, model_curve=None):
-    if args.ft_path is not None and args.ft_path != 'None':
-        ckpts = [args.ft_path]
+    if expname is None:
+        ckpts = []
     else:
-        ckpts = [os.path.join(basedir, expname, f) for f in sorted(os.listdir(os.path.join(basedir, expname))) if
-                 'tar' in f]
+        if args.ft_path is not None and args.ft_path != 'None':
+            ckpts = [args.ft_path]
+        else:
+            ckpts = [os.path.join(basedir, expname, f) for f in sorted(os.listdir(os.path.join(basedir, expname))) if
+                     'tar' in f]
     start = 0
     print('Found ckpts', ckpts)
     if len(ckpts) > 0 and not args.no_reload:

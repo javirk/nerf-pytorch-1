@@ -2,6 +2,7 @@ import os
 import imageio
 import time
 from tqdm import tqdm, trange
+import matplotlib.pyplot as plt
 
 from libs.run_nerf_helpers import *
 
@@ -145,7 +146,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         t = time.time()
         rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3, :4], **render_kwargs)
         rgbs.append(rgb.cpu().numpy())
-        disps.append(disp.cpu().numpy())
+        disps.append(disp.nan_to_num(0).cpu().numpy())
         if i == 0:
             print(rgb.shape, disp.shape)
 
@@ -159,6 +160,10 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             rgb8 = to8b(rgbs[-1])
             filename = os.path.join(savedir, '{:03d}.png'.format(i))
             imageio.imwrite(filename, rgb8)
+            # disp8 = to8b(disps[-1])
+            filename = os.path.join(savedir, '{:03d}_disp.png'.format(i))
+            plt.imsave(filename, disps[-1])
+            # imageio.imwrite(filename, disp)
 
     rgbs = np.stack(rgbs, 0)
     disps = np.stack(disps, 0)
@@ -658,7 +663,7 @@ def train():
             os.makedirs(testsavedir, exist_ok=True)
             print('test poses shape', render_poses.shape)
 
-            rgbs, _ = render_path(render_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=images,
+            rgbs, disps = render_path(render_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=images,
                                   savedir=testsavedir, render_factor=args.render_factor)
             print('Done rendering', testsavedir)
             imageio.mimwrite(os.path.join(testsavedir, 'video.mp4'), to8b(rgbs), fps=30, quality=8)
