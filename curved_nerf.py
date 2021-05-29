@@ -130,7 +130,7 @@ def render(H, W, focal, chunk=1024 * 32, rays=None, c2w=None, ndc=True,
     return ret_list + [ret_dict]
 
 
-def     render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=None, render_factor=0):
+def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=None, render_factor=0):
     H, W, focal = hwf
 
     if render_factor != 0:
@@ -232,6 +232,7 @@ def create_nerf(args):
     render_kwargs_train = {
         'network_query_fn': network_query_fn,
         'perturb': args.perturb,
+        'perturb_direction': args.perturb_direction,
         'N_importance': args.N_importance,
         'network_fine': model_fine,
         'N_samples': args.N_samples,
@@ -309,6 +310,7 @@ def render_rays(ray_batch,
                 retraw=False,
                 lindisp=False,
                 perturb=0.,
+                perturb_direction=0.,
                 N_importance=0,
                 network_fine=None,
                 white_bkgd=False,
@@ -328,6 +330,8 @@ def render_rays(ray_batch,
       lindisp: bool. If True, sample linearly in inverse depth rather than in depth.
       perturb: float, 0 or 1. If non-zero, each ray is sampled at stratified
         random points in time.
+      perturb_direction: float, 0 or 1. If non-zero, slightly perturb rays initial
+        direction.
       N_importance: int. Number of additional times to sample along each ray.
         These samples are only passed to network_fine.
       network_fine: "fine" network with same spec as network_fn.
@@ -353,9 +357,9 @@ def render_rays(ray_batch,
 
     t_vals = torch.linspace(0., 1., steps=N_samples)
     if not lindisp:
-        z_vals = near * (1. - t_vals) + far * (t_vals)
+        z_vals = near * (1. - t_vals) + far * t_vals
     else:
-        z_vals = 1. / (1. / near * (1. - t_vals) + 1. / far * (t_vals))
+        z_vals = 1. / (1. / near * (1. - t_vals) + 1. / far * t_vals)
 
     z_vals = z_vals.expand([N_rays, N_samples])
 
@@ -368,6 +372,11 @@ def render_rays(ray_batch,
         t_rand = torch.rand(z_vals.shape)
 
         z_vals = lower + (upper - lower) * t_rand
+
+    if perturb_direction > 0.:
+        rays_d += torch.randn(rays_d.shape) * 0.02  # Maybe this number should be the resolution?
+                                                    # I don't know, I add a random number in a normal distribution with
+                                                    # mean = 0 and std = 0.02
 
     input_batch = make_batch_rays(rays_o, rays_d, z_vals).to(device)
     pts = curver(input_batch)
@@ -393,7 +402,7 @@ def render_rays(ray_batch,
         rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd,
                                                                      pytest=pytest)
 
-    ret = {'rgb_map': rgb_map, 'disp_map': disp_map, 'acc_map': acc_map}
+    ret = {'rgb_map': rgb_map, 'disp_map': disp_map, 'acc_map': acc_map, 'pts': pts}
     if retraw:
         ret['raw'] = raw
     if N_importance > 0:
@@ -460,6 +469,8 @@ def config_parser():
                         help='number of additional fine samples per ray')
     parser.add_argument("--perturb", type=float, default=1.,
                         help='set to 0. for no jitter, 1. for jitter')
+    parser.add_argument("--perturb_direction", type=float, default=1.,
+                        help='set to 0. for no "antialiasing" effect, 1. for "antialiasing"')
     parser.add_argument("--use_viewdirs", action='store_true',
                         help='use full 5D input instead of 3D')
     parser.add_argument("--i_embed", type=int, default=0,
@@ -747,7 +758,8 @@ def train():
 
         optimizer.zero_grad()
         img_loss = img2mse(rgb, target_s)
-        loss = img_loss
+        pts_loss = condense_loss(extras['pts'], far)
+        loss = img_loss + pts_loss
         psnr = mse2psnr(img_loss)
 
         if 'rgb0' in extras:

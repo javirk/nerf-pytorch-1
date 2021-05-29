@@ -1,8 +1,8 @@
-expname = spheres_generated
+expname = spheres_condensation
 basedir = ./logs
 datadir = ./data/curved
 dataset_type = blender
-previous_training = spheres_generated
+previous_training = spheres
 
 no_batching = True
 freeze_nerf = False

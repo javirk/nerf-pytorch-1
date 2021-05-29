@@ -11,3 +11,4 @@ logs/*
 test.py
 .idea
 *.pth
+jupyter/
