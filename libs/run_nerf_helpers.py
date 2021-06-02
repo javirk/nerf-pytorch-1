@@ -11,6 +11,7 @@ torch.autograd.set_detect_anomaly(True)
 img2mse = lambda x, y: torch.mean((x - y) ** 2)
 mse2psnr = lambda x: -10. * torch.log(x) / torch.log(torch.Tensor([10.]))
 to8b = lambda x: (255 * np.clip(x, 0, 1)).astype(np.uint8)
+# f is the z_val, or the module of the vector in straight space
 condense_loss = lambda x, f: torch.mean(torch.clip(torch.norm(x, p=1, dim=-1) - f, min=0))
 
 

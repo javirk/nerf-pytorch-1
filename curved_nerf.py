@@ -374,9 +374,9 @@ def render_rays(ray_batch,
         z_vals = lower + (upper - lower) * t_rand
 
     if perturb_direction > 0.:
-        rays_d += torch.randn(rays_d.shape) * 0.02  # Maybe this number should be the resolution?
-                                                    # I don't know, I add a random number in a normal distribution with
-                                                    # mean = 0 and std = 0.02
+        rays_d += torch.randn(rays_d.shape) * 0.002  # Maybe this number should be the resolution?
+                                                     # I don't know, I add a random number in a normal distribution with
+                                                     # mean = 0 and std = 0.002
 
     input_batch = make_batch_rays(rays_o, rays_d, z_vals).to(device)
     pts = curver(input_batch)
@@ -409,6 +409,7 @@ def render_rays(ray_batch,
         ret['rgb0'] = rgb_map_0
         ret['disp0'] = disp_map_0
         ret['acc0'] = acc_map_0
+        ret['z_vals'] = z_vals
         ret['z_std'] = torch.std(z_samples, dim=-1, unbiased=False)  # [N_rays]
 
     for k in ret:
@@ -758,7 +759,7 @@ def train():
 
         optimizer.zero_grad()
         img_loss = img2mse(rgb, target_s)
-        pts_loss = condense_loss(extras['pts'], far)
+        pts_loss = condense_loss(extras['pts'] - rays_o.unsqueeze(1), extras['z_vals'])
         loss = img_loss + pts_loss
         psnr = mse2psnr(img_loss)
 
