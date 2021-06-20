@@ -259,7 +259,6 @@ def make_batch_rays(rays_o, rays_d, z_vals):
 
     b = torch.cat((rays_o, rays_d), dim=-1).unsqueeze(1)
     b = b.expand(N_rays, N_samples, 6)
-    b = torch.cat((b, z_vals.unsqueeze(-1)), dim=-1)
 
     return b
 

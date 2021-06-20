@@ -1,4 +1,4 @@
-expname = spheres_condensation
+expname = spheres
 basedir = ./logs
 datadir = ./data/curved
 dataset_type = blender

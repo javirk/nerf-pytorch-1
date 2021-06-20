@@ -265,6 +265,7 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
     Returns:
         rgb_map: [num_rays, 3]. Estimated RGB color of a ray.
         disp_map: [num_rays]. Disparity map. Inverse of depth map.
+        disp_map: [num_rays]. Disparity map. Inverse of depth map.
         acc_map: [num_rays]. Sum of weights along each ray.
         weights: [num_rays, num_samples]. Weights assigned to each sampled color.
         depth_map: [num_rays]. Estimated distance to object.
@@ -356,30 +357,29 @@ def render_rays(ray_batch,
     near, far = bounds[..., 0], bounds[..., 1]  # [-1,1]
 
     t_vals = torch.linspace(0., 1., steps=N_samples)
-    if not lindisp:
-        z_vals = near * (1. - t_vals) + far * t_vals
-    else:
-        z_vals = 1. / (1. / near * (1. - t_vals) + 1. / far * t_vals)
-
-    z_vals = z_vals.expand([N_rays, N_samples])
+    t_vals = t_vals.expand([N_rays, N_samples])
 
     if perturb > 0.:
         # get intervals between samples
-        mids = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
-        upper = torch.cat([mids, z_vals[..., -1:]], -1)
-        lower = torch.cat([z_vals[..., :1], mids], -1)
+        mids = .5 * (t_vals[..., 1:] + t_vals[..., :-1])
+        upper = torch.cat([mids, t_vals[..., -1:]], -1)
+        lower = torch.cat([t_vals[..., :1], mids], -1)
         # stratified samples in those intervals
-        t_rand = torch.rand(z_vals.shape)
+        t_rand = torch.rand(t_vals.shape)
 
-        z_vals = lower + (upper - lower) * t_rand
+        t_vals = lower + (upper - lower) * t_rand
+
+    # z_vals = near * (1. - t_vals) + far * t_vals
 
     if perturb_direction > 0.:
         rays_d += torch.randn(rays_d.shape) * 0.002  # Maybe this number should be the resolution?
                                                      # I don't know, I add a random number in a normal distribution with
                                                      # mean = 0 and std = 0.002
 
-    input_batch = make_batch_rays(rays_o, rays_d, z_vals).to(device)
-    pts = curver(input_batch)
+    input_batch = make_batch_rays(rays_o, rays_d, t_vals).to(device)
+    pts, z_vals = curver(input_batch, t_vals.unsqueeze(-1))
+
+    z_vals = z_vals.squeeze(-1)
 
     raw = network_query_fn(pts, viewdirs, network_fn)
     rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd,
@@ -388,14 +388,14 @@ def render_rays(ray_batch,
     if N_importance > 0:
         rgb_map_0, disp_map_0, acc_map_0 = rgb_map, disp_map, acc_map
 
-        z_vals_mid = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
-        z_samples = sample_pdf(z_vals_mid, weights[..., 1:-1], N_importance, det=(perturb == 0.), pytest=pytest)
-        z_samples = z_samples.detach()
+        t_vals_mid = .5 * (t_vals[..., 1:] + t_vals[..., :-1])
+        t_samples = sample_pdf(t_vals_mid, weights[..., 1:-1], N_importance, det=(perturb == 0.), pytest=pytest)
+        t_samples = t_samples.detach()
 
-        z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
-        input_batch = make_batch_rays(rays_o, rays_d, z_vals).to(device)
-        pts = curver(input_batch)
-
+        t_vals, _ = torch.sort(torch.cat([t_vals, t_samples], -1), -1)
+        input_batch = make_batch_rays(rays_o, rays_d, t_vals).to(device)
+        pts, z_vals = curver(input_batch, t_vals.unsqueeze(-1))
+        z_vals = z_vals.squeeze(-1)
         run_fn = network_fn if network_fine is None else network_fine
         raw = network_query_fn(pts, viewdirs, run_fn)
 
@@ -410,7 +410,7 @@ def render_rays(ray_batch,
         ret['disp0'] = disp_map_0
         ret['acc0'] = acc_map_0
         ret['z_vals'] = z_vals
-        ret['z_std'] = torch.std(z_samples, dim=-1, unbiased=False)  # [N_rays]
+        ret['z_std'] = torch.std(t_samples, dim=-1, unbiased=False)  # [N_rays], probably wrong, but it's not used I think
 
     for k in ret:
         if (torch.isnan(ret[k]).any() or torch.isinf(ret[k]).any()) and DEBUG:
@@ -703,8 +703,9 @@ def train():
 
         optimizer.zero_grad()
         img_loss = img2mse(rgb, target_s)
-        pts_loss = condense_loss(extras['pts'] - rays_o.unsqueeze(1), extras['z_vals'])
-        loss = img_loss + pts_loss
+        # pts_loss = condense_loss(extras['pts'] - rays_o.unsqueeze(1), extras['z_vals'])
+        # loss = img_loss + pts_loss
+        loss = img_loss
         psnr = mse2psnr(img_loss)
 
         if 'rgb0' in extras:
