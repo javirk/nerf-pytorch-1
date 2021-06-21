@@ -450,6 +450,8 @@ def config_parser():
                         help='exponential learning rate decay (in 1000 steps)')
     parser.add_argument("--chunk", type=int, default=1024 * 32,
                         help='number of rays processed in parallel, decrease if running out of memory')
+    parser.add_argument("--chunk_test", type=int, default=5000,
+                        help='number of rays processed in parallel in the test runs, decrease if running out of memory')
     parser.add_argument("--netchunk", type=int, default=1024 * 64,
                         help='number of pts sent through network in parallel, decrease if running out of memory')
     parser.add_argument("--no_batching", action='store_true',
@@ -612,7 +614,7 @@ def train():
             os.makedirs(testsavedir, exist_ok=True)
             print('test poses shape', render_poses.shape)
 
-            rgbs, disp = render_path(render_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=images,
+            rgbs, disp = render_path(render_poses, hwf, args.chunk_test, render_kwargs_test, gt_imgs=images,
                                   savedir=testsavedir, render_factor=args.render_factor)
             print('Done rendering', testsavedir)
             imageio.mimwrite(os.path.join(testsavedir, 'video.mp4'), to8b(rgbs), fps=30, quality=8)
@@ -741,7 +743,7 @@ def train():
         if i % args.i_video == 0 and i > 0:
             # Turn on testing mode
             with torch.no_grad():
-                rgbs, disps = render_path(render_poses, hwf, args.chunk, render_kwargs_test)
+                rgbs, disps = render_path(render_poses, hwf, args.chunk_test, render_kwargs_test)
             print('Done, saving', rgbs.shape, disps.shape)
             moviebase = os.path.join(basedir, expname, '{}_spiral_{:06d}_'.format(expname, i))
             imageio.mimwrite(moviebase + 'rgb.mp4', to8b(rgbs), fps=30, quality=8)
@@ -752,7 +754,7 @@ def train():
             os.makedirs(testsavedir, exist_ok=True)
             print('test poses shape', poses[i_test].shape)
             with torch.no_grad():
-                render_path(torch.Tensor(poses[i_test]).to(device), hwf, args.chunk, render_kwargs_test,
+                render_path(torch.Tensor(poses[i_test]).to(device), hwf, args.chunk_test, render_kwargs_test,
                             gt_imgs=images[i_test], savedir=testsavedir)
             print('Saved test set')
 
