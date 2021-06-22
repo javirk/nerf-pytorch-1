@@ -8,6 +8,7 @@ from tqdm import tqdm, trange
 
 from libs.curve_rays import CurveModel
 from libs.run_nerf_helpers import *
+from libs.other_helpers import unit_vector
 
 from loaders.load_llff import load_llff_data
 from loaders.load_deepvoxels import load_dv_data
@@ -151,12 +152,6 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         disps.append(disp.nan_to_num(0).cpu().numpy())
         if i == 0:
             print(rgb.shape, disp.shape)
-
-        """
-        if gt_imgs is not None and render_factor==0:
-            p = -10. * np.log10(np.mean(np.square(rgb.cpu().numpy() - gt_imgs[i])))
-            print(p)
-        """
 
         if savedir is not None:
             rgb8 = to8b(rgbs[-1])
@@ -369,15 +364,20 @@ def render_rays(ray_batch,
 
         t_vals = lower + (upper - lower) * t_rand
 
-    # z_vals = near * (1. - t_vals) + far * t_vals
+    z_vals = near * (1. - t_vals) + far * t_vals
 
     if perturb_direction > 0.:
         rays_d += torch.randn(rays_d.shape) * 0.002  # Maybe this number should be the resolution?
                                                      # I don't know, I add a random number in a normal distribution with
                                                      # mean = 0 and std = 0.002
 
+    # rays_o = unit_vector(rays_o, dim=1)
+    # rays_d = unit_vector(rays_d, dim=1)
+
     input_batch = make_batch_rays(rays_o, rays_d, t_vals).to(device)
     pts, z_vals = curver(input_batch, t_vals.unsqueeze(-1))
+
+    # pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]  # [N_rays, N_samples, 3]
 
     z_vals = z_vals.squeeze(-1)
 
@@ -393,8 +393,11 @@ def render_rays(ray_batch,
         t_samples = t_samples.detach()
 
         t_vals, _ = torch.sort(torch.cat([t_vals, t_samples], -1), -1)
+        z_vals = near * (1. - t_vals) + far * t_vals
         input_batch = make_batch_rays(rays_o, rays_d, t_vals).to(device)
         pts, z_vals = curver(input_batch, t_vals.unsqueeze(-1))
+        # pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :,
+        #                                                     None]  # [N_rays, N_samples + N_importance, 3]
         z_vals = z_vals.squeeze(-1)
         run_fn = network_fn if network_fine is None else network_fine
         raw = network_query_fn(pts, viewdirs, run_fn)
@@ -696,6 +699,11 @@ def train():
                 select_coords = coords[select_inds].long()  # (N_rand, 2)
                 rays_o = rays_o[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
                 rays_d = rays_d[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
+
+                rays_o = unit_vector(rays_o, dim=1)  # They are unitary because is already trained in 2-6.
+                                                     # I don't like this too much
+                rays_d = unit_vector(rays_d, dim=1)
+
                 batch_rays = torch.stack([rays_o, rays_d], 0)
                 target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
 

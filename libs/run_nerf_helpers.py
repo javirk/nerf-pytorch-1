@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import os
+from libs.other_helpers import unit_vector
 
 torch.autograd.set_detect_anomaly(True)
 
@@ -166,6 +167,10 @@ def get_rays(H, W, focal, c2w):
                        -1)  # dot product, equals to: [c2w.dot(dir) for dir in dirs]
     # Translate camera frame's origin to the world frame. It is the origin of all rays.
     rays_o = c2w[:3, -1].expand(rays_d.shape)
+
+    # I don't like this too much
+    rays_o = unit_vector(rays_o, dim=-1)  # They are unitary because is already trained in 2-6.
+    rays_d = unit_vector(rays_d, dim=-1)
     return rays_o, rays_d
 
 
