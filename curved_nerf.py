@@ -226,7 +226,6 @@ def create_nerf(args):
     render_kwargs_train = {
         'network_query_fn': network_query_fn,
         'perturb': args.perturb,
-        'perturb_direction': args.perturb_direction,
         'N_importance': args.N_importance,
         'sampling_probability': args.sampling_probability,
         'network_fine': model_fine,
@@ -356,7 +355,8 @@ def render_rays(ray_batch,
     raw = network_query_fn(pts, viewdirs, network_fn)
     rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd,
                                                                  pytest=pytest)
-    # TODO: This is a big step I think
+
+    # TODO: Importance sampling is a big step I think
     if N_importance > 0:
         rgb_map_0, disp_map_0, acc_map_0 = rgb_map, disp_map, acc_map
 
@@ -452,8 +452,6 @@ def config_parser():
                         help='number of additional fine samples per ray')
     parser.add_argument("--perturb", type=float, default=1.,
                         help='set to 0. for no jitter, 1. for jitter')
-    parser.add_argument("--perturb_direction", type=float, default=1.,
-                        help='set to 0. for no "antialiasing" effect, 1. for "antialiasing"')
     parser.add_argument("--sampling_probability", type=float, default=1.,
                         help='Points with a probability under sampling_probability will not be considered')
     parser.add_argument("--use_viewdirs", action='store_true',

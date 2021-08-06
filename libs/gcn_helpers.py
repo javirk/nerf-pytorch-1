@@ -109,6 +109,7 @@ def get_pts_zvals(rays_o, rays_d, graph, N_samples, sampling_probability, pertur
     pts = graph.pos[idx]
 
     if perturb_points > 0:
+        # TODO: Fix this. This is not correct. Leave for later beacause it's regularization
         pts += torch.randn_like(pts)
 
     pts = rearrange(pts, 'r s d -> s r d')

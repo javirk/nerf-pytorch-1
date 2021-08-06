@@ -1,17 +1,22 @@
-expname = spheres_generated
+expname = spheres
 basedir = ./logs
 datadir = ./data/straight
 dataset_type = blender
+previous_training = None
+mesh_name = sphere_fine.msh
 
 no_batching = True
+freeze_nerf = False
 
 use_viewdirs = True
 white_bkgd = True
 lrate_decay = 500
 
 N_samples = 64
-N_importance = 64 # 128
+N_importance = 0 # 128
 N_rand = 1024
+perturb = 0
+sampling_probability = 0.95
 
 precrop_iters = 500
 precrop_frac = 0.5
