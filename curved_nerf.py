@@ -2,18 +2,16 @@ import os
 import imageio
 import time
 import matplotlib.pyplot as plt
+from einops import rearrange
 
 import torch
 from tqdm import tqdm, trange
 
-from libs.curve_rays import CurveModel
+from libs.gcn_helpers import *
 from libs.run_nerf_helpers import *
 from libs.other_helpers import unit_vector
 
-from loaders.load_llff import load_llff_data
-from loaders.load_deepvoxels import load_dv_data
 from loaders.load_blender import load_blender_data
-from loaders.load_custom import load_custom_data
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
@@ -179,8 +177,7 @@ def create_nerf(args):
     skips = [4]
     grad_vars = list()
 
-    model = NeRF(D=args.netdepth, W=args.netwidth,
-                 input_ch=input_ch, output_ch=output_ch, skips=skips,
+    model = NeRF(D=args.netdepth, W=args.netwidth, input_ch=input_ch, output_ch=output_ch, skips=skips,
                  input_ch_views=input_ch_views, use_viewdirs=args.use_viewdirs).to(device)
 
     if not args.freeze_nerf:
@@ -190,9 +187,8 @@ def create_nerf(args):
 
     model_fine = None
     if args.N_importance > 0:
-        model_fine = NeRF(D=args.netdepth_fine, W=args.netwidth_fine,
-                          input_ch=input_ch, output_ch=output_ch, skips=skips,
-                          input_ch_views=input_ch_views, use_viewdirs=args.use_viewdirs).to(device)
+        model_fine = NeRF(D=args.netdepth_fine, W=args.netwidth_fine, input_ch=input_ch, output_ch=output_ch,
+                          skips=skips, input_ch_views=input_ch_views, use_viewdirs=args.use_viewdirs).to(device)
         if not args.freeze_nerf:
             grad_vars += list(model_fine.parameters())
         else:
@@ -203,22 +199,25 @@ def create_nerf(args):
                                                                         embeddirs_fn=embeddirs_fn,
                                                                         netchunk=args.netchunk)
 
-    curver = CurveModel()
-    curver.load_state_dict(torch.load(args.c_path))
-    curver.to(device)
-    grad_vars += list(curver.parameters())
+    graph = read_mesh('meshes/' + args.mesh_name)
+    graph = transfer_batch_to_device(graph, device)
+
+    curver = None  # The curver model (GCN) will be here
 
     # Create optimizer
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
 
-    start = 0
     basedir = args.basedir
-    expname = args.expname + '_curved'
+    if 'curved' in args.datadir:
+        expname = args.expname + '_curved'
+    else:
+        expname = args.expname + '_straight'
 
     ##########################
 
     model, model_fine, optimizer, start = load_ckpt(optimizer, model, model_fine, args, basedir, args.previous_training)
-    model, model_fine, optimizer, start, curver = load_ckpt(optimizer, model, model_fine, args, basedir, expname, curved=True, model_curve=curver)
+    # model, model_fine, optimizer, start, curver = load_ckpt(optimizer, model, model_fine, args, basedir, expname,
+    #                                                         curved=True, model_curve=curver)
 
     # Load checkpoints from previous curved rays
 
@@ -229,13 +228,15 @@ def create_nerf(args):
         'perturb': args.perturb,
         'perturb_direction': args.perturb_direction,
         'N_importance': args.N_importance,
+        'sampling_probability': args.sampling_probability,
         'network_fine': model_fine,
         'N_samples': args.N_samples,
         'network_fn': model,
         'use_viewdirs': args.use_viewdirs,
         'white_bkgd': args.white_bkgd,
         'raw_noise_std': args.raw_noise_std,
-        'curver': curver
+        'curver': curver,
+        'graph': graph
     }
 
     # NDC only good for LLFF-style forward facing data
@@ -302,12 +303,13 @@ def render_rays(ray_batch,
                 network_fn,
                 network_query_fn,
                 N_samples,
+                graph,
                 curver,
                 retraw=False,
                 lindisp=False,
                 perturb=0.,
-                perturb_direction=0.,
                 N_importance=0,
+                sampling_probability=0.5,
                 network_fine=None,
                 white_bkgd=False,
                 raw_noise_std=0.,
@@ -326,8 +328,6 @@ def render_rays(ray_batch,
       lindisp: bool. If True, sample linearly in inverse depth rather than in depth.
       perturb: float, 0 or 1. If non-zero, each ray is sampled at stratified
         random points in time.
-      perturb_direction: float, 0 or 1. If non-zero, slightly perturb rays initial
-        direction.
       N_importance: int. Number of additional times to sample along each ray.
         These samples are only passed to network_fine.
       network_fine: "fine" network with same spec as network_fn.
@@ -348,43 +348,15 @@ def render_rays(ray_batch,
     N_rays = ray_batch.shape[0]
     rays_o, rays_d = ray_batch[:, 0:3], ray_batch[:, 3:6]  # [N_rays, 3] each
     viewdirs = ray_batch[:, -3:] if ray_batch.shape[-1] > 8 else None
-    bounds = torch.reshape(ray_batch[..., 6:8], [-1, 1, 2])
-    near, far = bounds[..., 0], bounds[..., 1]  # [-1,1]
+    bounds = torch.reshape(ray_batch[..., 6:8], [-1, 1, 2])  # N_rays, 1, 2
+    near, far = bounds[0, 0, 0], bounds[0, 0, 1]  # All rays have the same near and far value
 
-    t_vals = torch.linspace(0., 1., steps=N_samples)
-    t_vals = t_vals.expand([N_rays, N_samples])
-
-    if perturb > 0.:
-        # get intervals between samples
-        mids = .5 * (t_vals[..., 1:] + t_vals[..., :-1])
-        upper = torch.cat([mids, t_vals[..., -1:]], -1)
-        lower = torch.cat([t_vals[..., :1], mids], -1)
-        # stratified samples in those intervals
-        t_rand = torch.rand(t_vals.shape)
-
-        t_vals = lower + (upper - lower) * t_rand
-
-    z_vals = near * (1. - t_vals) + far * t_vals
-
-    if perturb_direction > 0.:
-        rays_d += torch.randn(rays_d.shape) * 0.002  # Maybe this number should be the resolution?
-                                                     # I don't know, I add a random number in a normal distribution with
-                                                     # mean = 0 and std = 0.002
-
-    # rays_o = unit_vector(rays_o, dim=1)
-    # rays_d = unit_vector(rays_d, dim=1)
-
-    input_batch = make_batch_rays(rays_o, rays_d, t_vals).to(device)
-    pts, z_vals = curver(input_batch, t_vals.unsqueeze(-1))
-
-    # pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]  # [N_rays, N_samples, 3]
-
-    z_vals = z_vals.squeeze(-1)
+    pts, z_vals = get_pts_zvals(rays_o, rays_d, graph, N_samples, sampling_probability, perturb_points=perturb)
 
     raw = network_query_fn(pts, viewdirs, network_fn)
     rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd,
                                                                  pytest=pytest)
-
+    # TODO: This is a big step I think
     if N_importance > 0:
         rgb_map_0, disp_map_0, acc_map_0 = rgb_map, disp_map, acc_map
 
@@ -413,7 +385,8 @@ def render_rays(ray_batch,
         ret['disp0'] = disp_map_0
         ret['acc0'] = acc_map_0
         ret['z_vals'] = z_vals
-        ret['z_std'] = torch.std(t_samples, dim=-1, unbiased=False)  # [N_rays], probably wrong, but it's not used I think
+        ret['z_std'] = torch.std(t_samples, dim=-1,
+                                 unbiased=False)  # [N_rays], probably wrong, but it's not used I think
 
     for k in ret:
         if (torch.isnan(ret[k]).any() or torch.isinf(ret[k]).any()) and DEBUG:
@@ -435,6 +408,8 @@ def config_parser():
                         help='input data directory')
     parser.add_argument('--previous_training', type=str,
                         help='Previous training path')
+    parser.add_argument('--mesh_name', type=str,
+                        help='Filename of the mesh inside the "meshes" folder')
 
     # training options
     parser.add_argument("--netdepth", type=int, default=8,
@@ -445,6 +420,8 @@ def config_parser():
                         help='layers in fine network')
     parser.add_argument("--netwidth_fine", type=int, default=256,
                         help='channels per layer in fine network')
+    parser.add_argument("--curver_dim", type=int, default=128,
+                        help='Hidden neurons in the curver network')
     parser.add_argument("--N_rand", type=int, default=32 * 32 * 4,
                         help='batch size (number of random rays per gradient step)')
     parser.add_argument("--lrate", type=float, default=5e-4,
@@ -463,7 +440,7 @@ def config_parser():
                         help='do not reload weights from saved ckpt')
     parser.add_argument("--ft_path", type=str, default=None,
                         help='specific weights npy file to reload for coarse network')
-    parser.add_argument('--c_path', type=str, default='models/straight_model.pth',
+    parser.add_argument('--c_path', type=str, default='models/lagrangian_straight.pth',
                         help='Curver model path')
     parser.add_argument('--freeze_nerf', action='store_true',
                         help='Freeze the NeRF architecture')
@@ -477,6 +454,8 @@ def config_parser():
                         help='set to 0. for no jitter, 1. for jitter')
     parser.add_argument("--perturb_direction", type=float, default=1.,
                         help='set to 0. for no "antialiasing" effect, 1. for "antialiasing"')
+    parser.add_argument("--sampling_probability", type=float, default=1.,
+                        help='Points with a probability under sampling_probability will not be considered')
     parser.add_argument("--use_viewdirs", action='store_true',
                         help='use full 5D input instead of 3D')
     parser.add_argument("--i_embed", type=int, default=0,
@@ -506,10 +485,6 @@ def config_parser():
                         help='options: custom / llff / blender / deepvoxels')
     parser.add_argument("--testskip", type=int, default=8,
                         help='will load 1/N images from test/val sets, useful for large datasets like deepvoxels')
-
-    ## deepvoxels flags
-    parser.add_argument("--shape", type=str, default='greek',
-                        help='options : armchair / cube / greek / vase')
 
     ## blender flags
     parser.add_argument("--white_bkgd", action='store_true',
@@ -554,8 +529,8 @@ def train():
         print('Loaded blender', images.shape, render_poses.shape, hwf, args.datadir)
         i_train, i_val, i_test = i_split
 
-        near = 2.
-        far = 6.
+        near = 0.
+        far = 1.
 
         if args.white_bkgd:
             images = images[..., :3] * images[..., -1:] + (1. - images[..., -1:])
@@ -575,7 +550,10 @@ def train():
 
     # Create log dir and copy the config file
     basedir = args.basedir
-    expname = args.expname + '_curved'
+    if 'curved' in args.datadir:
+        expname = args.expname + '_curved'
+    else:
+        expname = args.expname + '_straight'
     os.makedirs(os.path.join(basedir, expname), exist_ok=True)
     f = os.path.join(basedir, expname, 'args.txt')
     with open(f, 'w') as file:
@@ -618,7 +596,7 @@ def train():
             print('test poses shape', render_poses.shape)
 
             rgbs, disp = render_path(render_poses, hwf, args.chunk_test, render_kwargs_test, gt_imgs=images,
-                                  savedir=testsavedir, render_factor=args.render_factor)
+                                     savedir=testsavedir, render_factor=args.render_factor)
             print('Done rendering', testsavedir)
             imageio.mimwrite(os.path.join(testsavedir, 'video.mp4'), to8b(rgbs), fps=30, quality=8)
 
@@ -657,8 +635,6 @@ def train():
 
     start = start + 1
     for i in trange(start, N_iters + start):
-        time0 = time.time()
-
         # Sample random ray batch
         if use_batching:
             # Random over all images
@@ -701,7 +677,7 @@ def train():
                 rays_d = rays_d[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
 
                 rays_o = unit_vector(rays_o, dim=1)  # They are unitary because is already trained in 2-6.
-                                                     # I don't like this too much
+                # I don't like this too much
                 rays_d = unit_vector(rays_d, dim=1)
 
                 batch_rays = torch.stack([rays_o, rays_d], 0)
@@ -732,19 +708,15 @@ def train():
         new_lrate = args.lrate * (decay_rate ** (global_step / decay_steps))
         for param_group in optimizer.param_groups:
             param_group['lr'] = new_lrate
-        ################################
-
-        dt = time.time() - time0
-        # print(f"Step: {global_step}, Loss: {loss}, Time: {dt}")
-        #####           end            #####
 
         # Rest is logging
         if i % args.i_weights == 0:
             path = os.path.join(basedir, expname, '{:06d}.tar'.format(i))
             torch.save({'global_step': global_step,
-                'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
-                'network_fine_state_dict': render_kwargs_train['network_fine'].state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(), 'curver': render_kwargs_train['curver'].state_dict()},
+                        'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
+                        'network_fine_state_dict': render_kwargs_train['network_fine'].state_dict(),
+                        'optimizer_state_dict': optimizer.state_dict(),
+                        'curver': render_kwargs_train['curver'].state_dict()},
                        path)
             print('Saved checkpoints at', path)
 

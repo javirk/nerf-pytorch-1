@@ -169,7 +169,7 @@ def get_rays(H, W, focal, c2w):
     rays_o = c2w[:3, -1].expand(rays_d.shape)
 
     # I don't like this too much
-    rays_o = unit_vector(rays_o, dim=-1)  # They are unitary because is already trained in 2-6.
+    rays_o = unit_vector(rays_o, dim=-1)
     rays_d = unit_vector(rays_d, dim=-1)
     return rays_o, rays_d
 
@@ -251,25 +251,8 @@ def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
 
     return samples
 
-
-def make_batch_rays(rays_o, rays_d, z_vals):
-    '''
-
-    :param rays_o: [N_rays, 3] Ray origins
-    :param rays_d: [N_rays, 3] Ray directions
-    :param z_vals: [N_rays, N_samples] Positions to calculate
-    :return:
-    '''
-    N_rays, N_samples = z_vals.shape
-
-    b = torch.cat((rays_o, rays_d), dim=-1).unsqueeze(1)
-    b = b.expand(N_rays, N_samples, 6)
-
-    return b
-
-
 def load_ckpt(optimizer, model, model_fine, args, basedir, expname, curved=False, model_curve=None):
-    if expname is None:
+    if expname is None or expname == 'None':
         ckpts = []
     else:
         if args.ft_path is not None and args.ft_path != 'None':
