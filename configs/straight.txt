@@ -3,17 +3,19 @@ basedir = ./logs
 datadir = ./data/straight
 dataset_type = blender
 previous_training = None
-mesh_name = sphere_fine.msh
+mesh_name = variable_sphere.msh
+n_index = circular
 
 no_batching = True
-freeze_nerf = False
 
 use_viewdirs = True
 white_bkgd = True
 lrate_decay = 500
 
+N_steps = 40
+
 N_samples = 64
-N_importance = 0 # 128
+N_importance = 128 # 128
 N_rand = 1024
 perturb = 0
 sampling_probability = 0.95

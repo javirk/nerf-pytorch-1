@@ -251,7 +251,7 @@ def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
 
     return samples
 
-def load_ckpt(optimizer, model, model_fine, args, basedir, expname, curved=False, model_curve=None):
+def load_ckpt(optimizer, model, model_fine, args, basedir, expname, curved=False, tracer=None):
     if expname is None or expname == 'None':
         ckpts = []
     else:
@@ -269,8 +269,8 @@ def load_ckpt(optimizer, model, model_fine, args, basedir, expname, curved=False
 
         start = ckpt['global_step']
         if curved:
-            assert model_curve is not None, 'Model cannot be none'
-            model_curve.load_state_dict(ckpt['curver'])
+            assert tracer is not None, 'Model cannot be none'
+            tracer.load_state_dict(ckpt['tracer'])
             optimizer.load_state_dict(ckpt['optimizer_state_dict'])
 
         # Load model
@@ -279,6 +279,6 @@ def load_ckpt(optimizer, model, model_fine, args, basedir, expname, curved=False
             model_fine.load_state_dict(ckpt['network_fine_state_dict'])
 
     if curved:
-        return model, model_fine, optimizer, start, model_curve
+        return model, model_fine, optimizer, start, tracer
     else:
         return model, model_fine, optimizer, start
