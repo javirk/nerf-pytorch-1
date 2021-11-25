@@ -7,9 +7,11 @@ from einops import rearrange
 import torch
 from tqdm import tqdm, trange
 
-from libs.gcn_helpers import *
+from libs.mesh_helpers import *
+import libs.transforms as transforms
 from libs.run_nerf_helpers import *
 from libs.other_helpers import unit_vector
+from libs.tracing_model import EvolutionModel
 
 from loaders.load_blender import load_blender_data
 
@@ -199,10 +201,20 @@ def create_nerf(args):
                                                                         embeddirs_fn=embeddirs_fn,
                                                                         netchunk=args.netchunk)
 
-    graph = read_mesh('meshes/' + args.mesh_name)
-    graph = transfer_batch_to_device(graph, device)
+    tr = [transforms.TetraToEdge(remove_tetras=False), transforms.TetraToNeighbors(), transforms.TetraCoordinates()]
 
-    curver = None  # The curver model (GCN) will be here
+    tracer = EvolutionModel('meshes/' + args.mesh_name, n_steps=args.N_steps, transforms=tr)
+    tracer.to(device)
+    tracer.train()
+
+    if args.n_index == 'circular':
+        n_index = - 0.5 * (tracer.graph.pos.norm(dim=1).max() - tracer.graph.pos.norm(dim=1)) + 1.5
+    else:
+        raise NotImplementedError()
+
+    tracer.init_vars(n_index)
+
+    grad_vars += list(tracer.parameters())
 
     # Create optimizer
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
@@ -215,9 +227,9 @@ def create_nerf(args):
 
     ##########################
 
-    model, model_fine, optimizer, start = load_ckpt(optimizer, model, model_fine, args, basedir, args.previous_training)
-    # model, model_fine, optimizer, start, curver = load_ckpt(optimizer, model, model_fine, args, basedir, expname,
-    #                                                         curved=True, model_curve=curver)
+    # model, model_fine, optimizer, start = load_ckpt(optimizer, model, model_fine, args, basedir, args.previous_training)
+    model, model_fine, optimizer, start, curver = load_ckpt(optimizer, model, model_fine, args, basedir, expname,
+                                                            curved=True, tracer=tracer)
 
     # Load checkpoints from previous curved rays
 
@@ -234,8 +246,7 @@ def create_nerf(args):
         'use_viewdirs': args.use_viewdirs,
         'white_bkgd': args.white_bkgd,
         'raw_noise_std': args.raw_noise_std,
-        'curver': curver,
-        'graph': graph
+        'tracer': tracer
     }
 
     # NDC only good for LLFF-style forward facing data
@@ -302,8 +313,7 @@ def render_rays(ray_batch,
                 network_fn,
                 network_query_fn,
                 N_samples,
-                graph,
-                curver,
+                tracer,
                 retraw=False,
                 lindisp=False,
                 perturb=0.,
@@ -350,32 +360,48 @@ def render_rays(ray_batch,
     bounds = torch.reshape(ray_batch[..., 6:8], [-1, 1, 2])  # N_rays, 1, 2
     near, far = bounds[0, 0, 0], bounds[0, 0, 1]  # All rays have the same near and far value
 
-    pts, z_vals = get_pts_zvals(rays_o, rays_d, graph, N_samples, sampling_probability, perturb_points=perturb)
+    t_vals = torch.linspace(0.01, 1., steps=N_samples)
+    if not lindisp:
+        z_vals = near * (1. - t_vals) + far * (t_vals)
+    else:
+        z_vals = 1. / (1. / near * (1. - t_vals) + 1. / far * (t_vals))
+
+    z_vals = z_vals.expand([N_rays, N_samples]).unsqueeze(-1)
+
+    if perturb > 0.:
+        # get intervals between samples
+        mids = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
+        upper = torch.cat([mids, z_vals[..., -1:]], -1)
+        lower = torch.cat([z_vals[..., :1], mids], -1)
+        # stratified samples in those intervals
+        t_rand = torch.rand(z_vals.shape)
+
+        z_vals = lower + (upper - lower) * t_rand
+
+    pts = tracer(rays_o, rays_d, z_vals)
 
     raw = network_query_fn(pts, viewdirs, network_fn)
-    rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd,
-                                                                 pytest=pytest)
+    rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals.squeeze(-1), rays_d, raw_noise_std,
+                                                                 white_bkgd, pytest=pytest)
 
-    # TODO: Importance sampling is a big step I think
     if N_importance > 0:
         rgb_map_0, disp_map_0, acc_map_0 = rgb_map, disp_map, acc_map
 
-        t_vals_mid = .5 * (t_vals[..., 1:] + t_vals[..., :-1])
+        t_vals_mid = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
         t_samples = sample_pdf(t_vals_mid, weights[..., 1:-1], N_importance, det=(perturb == 0.), pytest=pytest)
         t_samples = t_samples.detach()
 
-        t_vals, _ = torch.sort(torch.cat([t_vals, t_samples], -1), -1)
+        t_vals, _ = torch.sort(torch.cat([z_vals, t_samples], -1), -1)
         z_vals = near * (1. - t_vals) + far * t_vals
-        input_batch = make_batch_rays(rays_o, rays_d, t_vals).to(device)
-        pts, z_vals = curver(input_batch, t_vals.unsqueeze(-1))
+        pts = tracer(rays_o, rays_d, z_vals)
         # pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :,
         #                                                     None]  # [N_rays, N_samples + N_importance, 3]
         z_vals = z_vals.squeeze(-1)
         run_fn = network_fn if network_fine is None else network_fine
         raw = network_query_fn(pts, viewdirs, run_fn)
 
-        rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd,
-                                                                     pytest=pytest)
+        rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals.squeeze(-1), rays_d, raw_noise_std,
+                                                                     white_bkgd, pytest=pytest)
 
     ret = {'rgb_map': rgb_map, 'disp_map': disp_map, 'acc_map': acc_map, 'pts': pts}
     if retraw:
@@ -448,6 +474,10 @@ def config_parser():
     # rendering options
     parser.add_argument("--N_samples", type=int, default=64,
                         help='number of coarse samples per ray')
+    parser.add_argument("--n_index", type=str, default='circular',
+                        help='Type of refractive index initialisation')
+    parser.add_argument("--N_steps", type=int, default=64,
+                        help='Number of steps in the tracer (triangles to cross)')
     parser.add_argument("--N_importance", type=int, default=0,
                         help='number of additional fine samples per ray')
     parser.add_argument("--perturb", type=float, default=1.,
