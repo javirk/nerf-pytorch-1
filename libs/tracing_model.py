@@ -6,9 +6,9 @@ from einops import rearrange
 
 
 class EvolutionModel(nn.Module):
-    def __init__(self, filename, n_steps, transforms):
+    def __init__(self, folder, n_steps, transforms):
         super(EvolutionModel, self).__init__()
-        self.graph = read_mesh(filename, '3D', transforms)
+        self.graph = read_mesh(folder, '3D', transforms)
 
         self.n_steps = n_steps
         # self.n_samples = n_samples
@@ -20,7 +20,7 @@ class EvolutionModel(nn.Module):
     def forward(self, r0, m0, z_vals):
         assert self.initialized, 'init_vars() must be called before trying to evolve.'
 
-        evolution = self.evolve(r0, m0)
+        evolution = self.evolve(r0, m0, z_vals.max())
 
         r_hist = evolution['r_hist']
         # m_hist = evolution['m_hist']
@@ -81,18 +81,51 @@ class EvolutionModel(nn.Module):
         self.graph.a = a
         self.graph.b = b
 
-    def evolve_in_tetrahedron(self, tetra_idx, rp, m):
+    @torch.no_grad()
+    def intersect_straight_ray(self, tetra_idx, rp, m, restricted_face):
+        """
+        Intersect a ray with all the faces of a tetrahedron and return the parametric distance to the nearest face
+        :param tetra_idx:
+        :param rp:
+        :param m:
+        :param restricted_face: Face from which the ray comes
+        :return: torch.Tensor([B, 1])
+        """
+        bs = m.shape[0]
+        faces = self.graph.tetra_face[tetra_idx]
+        faces = rearrange(faces, 'b f -> f b')
+
+        t_all = torch.ones((bs, 4), device=faces.device, dtype=rp.dtype) * 100
+        t_restricted = torch.zeros(bs, device=faces.device, dtype=rp.dtype)
+        t_debug = torch.ones((bs, 4), device=faces.device, dtype=rp.dtype)
+        for it, face in enumerate(faces):
+            vtx_face = self.graph.face_vertex[face]
+            pos_vtx_face = self.graph.pos[vtx_face]  #  B x Points x Coordinates
+            i = pos_vtx_face[:, 0]
+            j = pos_vtx_face[:, 1]
+            k = pos_vtx_face[:, 2]
+
+            N = torch.cross(j - i, k - i, dim=1)
+            D = batch_dot(N, i)
+            t = (- batch_dot(N, rp) + D) / batch_dot(N, m)
+            t_debug[:, it] = t
+            # t_all[:, it] = torch.where(t > 0, t, t_all[:, it])
+            t_restricted[:] = torch.where(face == restricted_face, t, t_restricted)
+            t_all[:, it] = torch.where((t > 0) & (face != restricted_face), t, t_all[:, it])
+
+        min_t = t_all.min(dim=1).values
+        t_next = (min_t - t_restricted) / 2
+
+        return t_next.unsqueeze(1)
+
+
+    def evolve_in_tetrahedron(self, tetra_idx, rp, m, debug_pos=None):
         """ This is where the magic happens. Based on https://academic.oup.com/qjmam/article/65/1/87/1829302"""
         bs = m.shape[0]
 
-        outside_idx = (tetra_idx == -1)
-        outside_pos = rp + m  # Straight line
-
         a = self.graph.a[tetra_idx]
         b = self.graph.b[tetra_idx]
-        # p = self.graph.pos[self.graph.tetra[:, tetra_idx]]
         n = self.graph.n[tetra_idx]
-        # p = rearrange(p, 'p b c -> b p c')
         faces = self.graph.tetra_face[tetra_idx]
         faces = rearrange(faces, 'b f -> f b')
 
@@ -102,8 +135,9 @@ class EvolutionModel(nn.Module):
         mn_dot = batch_dot(m, n).unsqueeze(1)
         rc = rp - (batch_dot(rp, n) + a / b.norm(dim=1)).unsqueeze(1) * (n - (mn_dot * nq) / batch_dot(m, nq).unsqueeze(1))
         R = rc - rp
-
-        phiR = torch.zeros((bs, 4), device=R.device)
+        if debug_pos:
+            print(f'Tetra_idx: {tetra_idx[debug_pos]}')
+        phiR = torch.zeros((bs, 4), device=R.device, dtype=rp.dtype)
         for it, face in enumerate(faces):
             vtx_face = self.graph.face_vertex[face]
             pos_vtx_face = self.graph.pos[vtx_face]
@@ -127,18 +161,25 @@ class EvolutionModel(nn.Module):
             # else:
             phi1 = 2 * torch.atan((c2 + torch.sqrt(c1.pow(2) + c2.pow(2) - c3.pow(2))) / (c1 - c3))
             phi2 = 2 * torch.atan((c2 - torch.sqrt(c1.pow(2) + c2.pow(2) - c3.pow(2))) / (c1 - c3))
+            if debug_pos:
+                print(it, phi1[debug_pos].item(), phi2[debug_pos].item())
             phi1 = wrap_to_2pi(phi1)
             phi2 = wrap_to_2pi(phi2)
             phi_cat = torch.stack([phi1, phi2], dim=-1)
             phiR[:, it] = phi_cat.min(dim=1).values
 
-        phiR = torch.nan_to_num(phiR, nan=10)
-        phiE, idx_face = phiR.min(dim=1, keepdim=True)
+        if debug_pos:
+            print('\n')
 
-        phiE += phiE * 1 / 100  # This is to make sure that the next point starts inside the next tetrahedron
+        phiR = torch.nan_to_num(phiR, nan=10)
+        first_phi, _ = torch.topk(phiR, k=2, dim=1, largest=False)
+        # phiE = first_phi.mean(dim=1).unsqueeze(-1)
+        phiE, idx_face = phiR.min(dim=1, keepdim=True)
+        # phiE += phiE / 1000
 
         # New direction and position
         re = rc - torch.cos(phiE) * R + R.norm(dim=1, keepdim=True) * torch.sin(phiE) * m
+        assert (re.norm(dim=1) < 5).all()
         me = torch.cos(phiE) * m + torch.sin(phiE) / R.norm(dim=1, keepdim=True) * R
 
         # Face number
@@ -146,17 +187,20 @@ class EvolutionModel(nn.Module):
 
         # Next tetrahedron
         local_idx_next = (self.graph.face_tetra[hit_face] != tetra_idx.unsqueeze(1)).nonzero(as_tuple=True)
-
         next_tetra = self.graph.face_tetra[hit_face][local_idx_next]
+
+        # This is to make sure that the next point starts inside the next tetrahedron.
+        t = self.intersect_straight_ray(next_tetra, re, me, hit_face)
+        if debug_pos:
+            print(f'{t[debug_pos]=}')
+        re += t * me
 
         distance = torch.norm(rp - re, dim=1)
 
-        # re = torch.where(outside_idx.unsqueeze(-1), outside_pos, re)
-        # next_tetra = torch.where(next_tetra == -1, tetra_idx, next_tetra)
-
         return next_tetra, re, me, distance
 
-    def evolve(self, r0, m0):
+    # plot_tetra(self.graph, tetra_idx[:, None], rp[:, None, :], m[:, None, :])
+    def evolve(self, r0, m0, far):
         r = r0.clone()
         m = m0.clone()
         tetra_idx = self.find_tetrahedron_point(r0)
@@ -165,19 +209,27 @@ class EvolutionModel(nn.Module):
         r_hist = [r]
         m_hist = [m]
         distances = [torch.zeros(r.shape[0], device=r.device)]
+        cumulative_distance = torch.zeros_like(distances[0])
         tetra_hist = [tetra_idx]
-        while i < self.n_steps and (tetra_idx != -1).all():
-            tetra_idx, r, m, d = self.evolve_in_tetrahedron(tetra_idx, r, m)
+        while i < self.n_steps and (tetra_idx != -1).all() and cumulative_distance.min() < far:
+            tetra_idx, r, m, d = self.evolve_in_tetrahedron(tetra_idx, r, m, debug_pos=402)
+            tetra_idx = self.find_tetrahedron_point(r)
+            # assert (tetra_idx_search == tetra_idx).all()
             r_hist.append(r)
             m_hist.append(m)
             distances.append(d)
             tetra_hist.append(tetra_idx)
+            cumulative_distance += d
             i += 1
+            # assert tetra_idx == self.find_tetrahedron_point(r)
+        print('hola', i)
 
         r_hist = torch.stack(r_hist, dim=1)
         m_hist = torch.stack(m_hist, dim=1)
         distances = torch.stack(distances, dim=1)
         tetra_hist = torch.stack(tetra_hist, dim=1)
+        # from libs.plot_helpers import plot_tetra
+        # plot_tetra(self.graph, tetra_hist, r_hist, m_hist, b_pos=581)
 
         distances = torch.cumsum(distances, dim=1)
 
@@ -188,7 +240,7 @@ class EvolutionModel(nn.Module):
         n_p = point.shape[0]
         orir = torch.repeat_interleave(self.graph.origin.unsqueeze(-1), n_p, dim=2)
         newp = torch.einsum('imk, kmj -> kij', self.graph.ort_tetra, point.T - orir)
-        val = torch.all(newp >= 0, dim=1) & torch.all(newp <= 1, dim=1) & (torch.sum(newp, dim=1) <= 1)
+        val = (torch.all(newp >= 0, dim=1) & torch.all(newp <= 1, dim=1) & (torch.sum(newp, dim=1) <= 1))
         id_tet, id_p = torch.nonzero(val, as_tuple=True)
 
         res = - torch.ones(n_p, dtype=id_tet.dtype, device=id_tet.device)  # Sentinel value
@@ -200,26 +252,31 @@ if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     mesh_type = '3D'
-    filename = '../meshes/sphere_coarse.msh'
+    filename = '../meshes/sphere_fine.msh'
     near = 0
     far = 1.5
     N_samples = 2
-    r0 = torch.tensor([[0.8, 0., 0.]], device=device)
-    m0 = torch.tensor([[-1, 0.1, 0.1]], dtype=torch.float32, device=device)
+    r0 = torch.tensor([[0.44940298795700073, 0.40466320514678955, -0.5139325261116028], [ 0.4494,  0.40466, -0.51393]], device=device)
+    m0 = torch.tensor([[-0.5564, -0.5963,  0.5787]], dtype=torch.float32, device=device)
     m0 = m0 / m0.norm(dim=1)
     tr = [t.TetraToEdge(remove_tetras=False), t.TetraToNeighbors(), t.TetraCoordinates()]
 
-    ev = EvolutionModel(filename, mesh_type, n_steps=1, n_samples=N_samples, transforms=tr)
+    ev = EvolutionModel(filename, n_steps=10, transforms=tr)
     ev.to(device)
     ev.train()
 
-    n_index = - 0.1 * ev.graph.pos.norm(dim=1) + 1.1
+    tet_batch = ev.find_tetrahedron_point(r0)
+    tet0 = ev.find_tetrahedron_point(r0[0].unsqueeze(0))
+    tet1 = ev.find_tetrahedron_point(r0[1].unsqueeze(0))
+    assert tet_batch[0] == tet0
+    assert tet_batch[1] == tet1
+    n_index = - 0.5 * (ev.graph.pos.norm(dim=1).max() - ev.graph.pos.norm(dim=1)) + 1.5
 
-    ev.compute_vars(n_index)
+    ev.init_vars(n_index)
 
-    f = ev(r0, m0)
+    f = ev.evolve(r0, m0)
 
-    crit = nn.MSELoss()
-    real = torch.randn_like(f)
-    loss = crit(f, real)
-    loss.backward()
+    # crit = nn.MSELoss()
+    # real = torch.randn_like(f)
+    # loss = crit(f, real)
+    # loss.backward()

@@ -201,14 +201,18 @@ def create_nerf(args):
                                                                         embeddirs_fn=embeddirs_fn,
                                                                         netchunk=args.netchunk)
 
-    tr = [transforms.TetraToEdge(remove_tetras=False), transforms.TetraToNeighbors(), transforms.TetraCoordinates()]
+    mesh_folder = 'meshes/' + args.mesh_name
+    tr = [transforms.TetraToEdge(remove_tetras=False), transforms.TetraToNeighbors(mesh_folder), transforms.TetraCoordinates()]
 
-    tracer = EvolutionModel('meshes/' + args.mesh_name, n_steps=args.N_steps, transforms=tr)
+    tracer = EvolutionModel(mesh_folder, n_steps=args.N_steps, transforms=tr)
     tracer.to(device)
     tracer.train()
 
     if args.n_index == 'circular':
-        n_index = - 0.5 * (tracer.graph.pos.norm(dim=1).max() - tracer.graph.pos.norm(dim=1)) + 1.5
+        max_tracer = tracer.graph.pos.norm(dim=1).max()
+        min_tracer = tracer.graph.pos.norm(dim=1).min()
+        n_index = - 0.5 * (max_tracer - tracer.graph.pos.norm(dim=1) / (max_tracer - min_tracer)) + 1.5
+        # n_index = tracer.graph.pos.norm(dim=1)
     else:
         raise NotImplementedError()
 
@@ -362,9 +366,9 @@ def render_rays(ray_batch,
 
     t_vals = torch.linspace(0.01, 1., steps=N_samples)
     if not lindisp:
-        z_vals = near * (1. - t_vals) + far * (t_vals)
+        z_vals = near * (1. - t_vals) + far * t_vals
     else:
-        z_vals = 1. / (1. / near * (1. - t_vals) + 1. / far * (t_vals))
+        z_vals = 1. / (1. / near * (1. - t_vals) + 1. / far * t_vals)
 
     z_vals = z_vals.expand([N_rays, N_samples])
 
@@ -692,8 +696,7 @@ def train():
                     coords = torch.stack(torch.meshgrid(torch.linspace(H // 2 - dH, H // 2 + dH - 1, 2 * dH),
                                                         torch.linspace(W // 2 - dW, W // 2 + dW - 1, 2 * dW)), -1)
                     if i == start:
-                        print(
-                            f"[Config] Center cropping of size {2 * dH} x {2 * dW} is enabled until iter {args.precrop_iters}")
+                        print(f"[Config] Center cropping of size {2 * dH} x {2 * dW} is enabled until iter {args.precrop_iters}")
                 else:
                     coords = torch.stack(torch.meshgrid(torch.linspace(0, H - 1, H), torch.linspace(0, W - 1, W)),
                                          -1)  # (H, W, 2)

@@ -1,3 +1,5 @@
+import glob
+
 import meshio
 import torch
 import numpy as np
@@ -46,7 +48,10 @@ def to_meshio(graph):
     return meshio.Mesh(points, cells)
 
 
-def read_mesh(mesh_path, dimensions, transforms):
+def read_mesh(mesh_folder, dimensions, transforms):
+    mesh_path = glob.glob(f'{mesh_folder}/*.msh')
+    assert len(mesh_path) == 1, 'More than one mesh file in the folder. Exiting'
+    mesh_path = mesh_path[0]
     mesh = meshio.read(
         mesh_path,  # string, os.PathLike, or a buffer/open file
     )
