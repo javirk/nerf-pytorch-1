@@ -5,7 +5,7 @@ import torch
 import numpy as np
 from torch_geometric.data import Data
 
-wrap_to_2pi = lambda x: x % (2 * np.pi) + (2 * np.pi) * (x == 0)
+wrap_to_2pi = lambda x: x % (2 * np.pi) #+ (2 * np.pi) * (x == 0)
 
 
 def from_meshio(mesh, mesh_type='2D'):

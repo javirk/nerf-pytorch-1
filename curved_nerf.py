@@ -211,14 +211,14 @@ def create_nerf(args):
     if args.n_index == 'circular':
         max_tracer = tracer.graph.pos.norm(dim=1).max()
         min_tracer = tracer.graph.pos.norm(dim=1).min()
-        n_index = - 0.5 * (max_tracer - tracer.graph.pos.norm(dim=1) / (max_tracer - min_tracer)) + 1.5
+        n_index = - 0.5 * (1-(max_tracer - tracer.graph.pos.norm(dim=1)) / (max_tracer - min_tracer)) + 1.5
         # n_index = tracer.graph.pos.norm(dim=1)
     else:
         raise NotImplementedError()
 
     tracer.init_vars(n_index)
 
-    grad_vars += list(tracer.parameters())
+    grad_vars += list(tracer.parameters())  # This is horrible but the best I know
 
     # Create optimizer
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
