@@ -54,6 +54,7 @@ def batchify_rays(rays_flat, chunk=1024 * 32, **kwargs):
     """
     all_ret = {}
     for i in range(0, rays_flat.shape[0], chunk):
+    # for i in range(5120, rays_flat.shape[0], chunk):
         ret = render_rays(rays_flat[i:i + chunk], **kwargs)
         for k in ret:
             if k not in all_ret:
@@ -159,6 +160,9 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             imageio.imwrite(filename, rgb8)
             filename = os.path.join(savedir, '{:03d}_disp.png'.format(i))
             plt.imsave(filename, disps[-1])
+
+        del rgb, disp
+        torch.cuda.empty_cache()
 
     rgbs = np.stack(rgbs, 0)
     disps = np.stack(disps, 0)

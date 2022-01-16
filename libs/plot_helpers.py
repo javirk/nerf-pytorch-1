@@ -28,6 +28,13 @@ def plot_tetra(data, tetra_hist, r_hist, m_hist=None, b_pos=0):
     r_hist = r_hist.detach().cpu()
     if m_hist is not None:
         m_hist = m_hist.detach().cpu()
+
+    if len(tetra_hist.shape) == 1:
+        tetra_hist = tetra_hist[:, None]
+        r_hist = r_hist[:, None]
+        if m_hist is not None:
+            m_hist = m_hist[:, None]
+
     cycol = cycle("bgrcmykw")
 
     fig = plt.figure()
@@ -46,6 +53,7 @@ def plot_tetra(data, tetra_hist, r_hist, m_hist=None, b_pos=0):
         ax.set_zlabel('Z Label')
 
         ax.scatter(r_hist[b_pos, i, 0], r_hist[b_pos, i, 1], r_hist[b_pos, i, 2], color=col)
-        ax.quiver(*r_hist[b_pos, i], m_hist[b_pos, i, 0] / 20, m_hist[b_pos, i, 1] / 20, m_hist[b_pos, i, 2] / 20,
-                  colors=col)
+        if m_hist is not None:
+            ax.quiver(*r_hist[b_pos, i], m_hist[b_pos, i, 0] / 20, m_hist[b_pos, i, 1] / 20, m_hist[b_pos, i, 2] / 20,
+                      colors=col)
         ax.text(verts[0,0], verts[0,1], verts[0,2], tetra_hist[b_pos, i].item(), color=col)
