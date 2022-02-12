@@ -116,7 +116,7 @@ class EvolutionModel(nn.Module):
             t_all[:, it] = torch.where((t > 0) & (face != restricted_face), t, t_all[:, it])
 
         min_t = t_all.min(dim=1).values
-        t_next = torch.max((min_t - t_restricted) / 3, t_restricted * 1.05)  # Move at least t_restricted.
+        t_next = torch.max((min_t - t_restricted) / 4, t_restricted * 1.10)  # Move at least t_restricted.
         # Maybe there is no need to do the other intersections
 
         return t_next.unsqueeze(1)
@@ -134,8 +134,7 @@ class EvolutionModel(nn.Module):
         q = mn / torch.sqrt(batch_dot(mn, mn).unsqueeze(1))
         nq = torch.cross(n, q)
         mn_dot = batch_dot(m, n).unsqueeze(1)
-        rc = rp - (batch_dot(rp, n) + a / b.norm(dim=1)).unsqueeze(1) * (
-                n - (mn_dot * nq) / batch_dot(m, nq).unsqueeze(1))
+        rc = rp - (batch_dot(rp, n) + a / b.norm(dim=1)).unsqueeze(1) * (n - (mn_dot * nq) / batch_dot(m, nq).unsqueeze(1))
         R = rc - rp
         if debug_pos:
             print(f'Tetra_idx: {tetra_idx[debug_pos]}')
@@ -203,6 +202,8 @@ class EvolutionModel(nn.Module):
         phi2 = 2 * torch.atan((c2 - in_sqrt) / (c1 - c3))
         # phi1 = 2 * torch.atan2((c2 + in_sqrt), (c1 - c3))
         # phi2 = 2 * torch.atan2((c2 - in_sqrt), (c1 - c3))
+        if debug_pos:
+            print('Sum_equal', ((phi2 == 0) & (c1 * c3 > 0)).sum())
 
         phi1 = torch.where((phi2 == 0) & (c1 * c3 > 0), phi1_equal, phi1)
         phi2 = torch.where((phi2 == 0) & (c1 * c3 > 0), phi2_equal, phi2)
@@ -210,7 +211,7 @@ class EvolutionModel(nn.Module):
         # phi1 = 2 * torch.atan((c2 + torch.sqrt(c1.pow(2) + c2.pow(2) - c3.pow(2))) / (c1 - c3))
         # phi2 = 2 * torch.atan((c2 - torch.sqrt(c1.pow(2) + c2.pow(2) - c3.pow(2))) / (c1 - c3))
         if debug_pos:
-            print(it, phi1[debug_pos].item(), phi2[debug_pos].item())
+            print(it, phi1[debug_pos].item(), phi2[debug_pos].item(), c1[debug_pos].item(), c3[debug_pos].item())
         phi1 = wrap_to_2pi(phi1)
         phi2 = wrap_to_2pi(phi2)
         phi_intersection = torch.stack([phi1, phi2], dim=-1)
@@ -250,7 +251,7 @@ class EvolutionModel(nn.Module):
         cumulative_distance = torch.zeros_like(distances[0])
         tetra_hist = [tetra_idx]
         while i < self.n_steps and (tetra_idx != -1).all() and cumulative_distance.min() < far:
-            tetra_idx, r, m, d = self.evolve_in_tetrahedron(tetra_idx, r, m)  # , debug_pos=866)
+            tetra_idx, r, m, d = self.evolve_in_tetrahedron(tetra_idx, r, m)#, debug_pos=871)
             tetra_idx = self.find_tetrahedron_point(r)
             # assert (tetra_idx_search == tetra_idx).all()
             r_hist.append(r)

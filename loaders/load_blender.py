@@ -74,6 +74,11 @@ def load_blender_data(basedir, half_res=False, testskip=1):
     # render_poses = torch.stack([pose_spherical(angle, -30.0, 4.0) for angle in np.linspace(-180, 180, 40 + 1)[:-1]], 0)
     render_poses = torch.stack([pose_spherical(-30, angle, 4.0) for angle in np.linspace(-180, 180, 40)[:-1]], 0)
 
+    # render_poses = torch.tensor([[[-0.8662109375,0.1583251953125,0.474365234375,1.8974609375],
+    #                               [-0.5,-0.274169921875,-0.82177734375,-3.287109375],
+    #                               [0,-0.94873046875,0.316650390625,1.2666015625],
+    #                               [0,0,0,1]]], device='cuda')
+
     if half_res:
         H = H // 2
         W = W // 2

@@ -54,7 +54,7 @@ def batchify_rays(rays_flat, chunk=1024 * 32, **kwargs):
     """
     all_ret = {}
     for i in range(0, rays_flat.shape[0], chunk):
-    # for i in range(5120, rays_flat.shape[0], chunk):
+    # for i in range(10240, rays_flat.shape[0], chunk):
         ret = render_rays(rays_flat[i:i + chunk], **kwargs)
         for k in ret:
             if k not in all_ret:
@@ -147,6 +147,7 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
     t = time.time()
     for i, c2w in enumerate(tqdm(render_poses)):
         print(i, time.time() - t)
+        print(c2w)
         t = time.time()
         rgb, disp, acc, _ = render(H, W, focal, chunk=chunk, c2w=c2w[:3, :4], **render_kwargs)
         rgbs.append(rgb.cpu().numpy())
