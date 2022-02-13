@@ -29,6 +29,7 @@ class EvolutionModel(nn.Module):
 
         # self.z_vals = self.z_vals.expand([N_rays, self.n_samples]).unsqueeze(-1)
         final_coords = self.sample_rays(r_hist, d, z_vals)
+        assert not final_coords.isnan().any()
         return final_coords
 
     @staticmethod
@@ -36,7 +37,7 @@ class EvolutionModel(nn.Module):
         tminusd = z_vals - distances.unsqueeze(1)
         tminusd_pos = tminusd.clone()
         tminusd_neg = tminusd.clone()
-        tminusd_pos[tminusd_pos < 0] = 10
+        tminusd_pos[tminusd_pos <= 0] = 10
         tminusd_neg[tminusd_neg > 0] = -10
 
         idx_top_pos = torch.topk(tminusd_pos, k=1, largest=False, sorted=False)  # Take the smallest
@@ -261,7 +262,6 @@ class EvolutionModel(nn.Module):
             cumulative_distance += d
             i += 1
             # assert tetra_idx == self.find_tetrahedron_point(r)
-        # print('hola', i)
 
         r_hist = torch.stack(r_hist, dim=1)
         m_hist = torch.stack(m_hist, dim=1)
