@@ -712,7 +712,7 @@ def train():
                 rays_o = rays_o[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
                 rays_d = rays_d[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
 
-                rays_o = unit_vector(rays_o, dim=1)  # They are unitary because is already trained in 2-6.
+                rays_o = unit_vector(rays_o, dim=1)  # They are unitary because it is already trained in 2-6.
                 # I don't like this too much
                 rays_d = unit_vector(rays_d, dim=1)
 
@@ -720,10 +720,12 @@ def train():
                 target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
 
         #####  Core optimization loop  #####
+        optimizer.zero_grad()
+        render_kwargs_train['tracer'].update_vars()
         rgb, disp, acc, extras = render(H, W, focal, chunk=args.chunk, rays=batch_rays, verbose=i < 10, retraw=True,
                                         **render_kwargs_train)
 
-        optimizer.zero_grad()
+
         img_loss = img2mse(rgb, target_s)
         # pts_loss = condense_loss(extras['pts'] - rays_o.unsqueeze(1), extras['z_vals'])
         # loss = img_loss + pts_loss
