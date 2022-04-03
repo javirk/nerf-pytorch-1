@@ -7,8 +7,6 @@ from einops import rearrange
 import torch
 from tqdm import tqdm, trange
 
-from libs.mesh_helpers import *
-import libs.transforms as transforms
 from libs.run_nerf_helpers import *
 from libs.other_helpers import unit_vector
 from libs.tracing_model import EvolutionModel, IoRModel
