@@ -77,12 +77,3 @@ def transfer_batch_to_device(batch, device):
     return batch
 
 
-def gather_batch(input, index):
-    b, t, p = index.shape
-    _, _, c = input.shape
-    output = torch.zeros((b, t, p, c), device=input.device)
-
-    for i, (val, idx) in enumerate(zip(input, index)):
-        output[i] = val[idx]
-
-    return output

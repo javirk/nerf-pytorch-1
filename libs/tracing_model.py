@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from libs.mesh_helpers import gather_batch
+from libs.run_nerf_helpers import gather_batch
 
 class IoRModel(nn.Module):
     def __init__(self):

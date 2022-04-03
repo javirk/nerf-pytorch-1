@@ -282,3 +282,13 @@ def load_ckpt(optimizer, model, model_fine, args, basedir, expname, curved=False
         return model, model_fine, optimizer, start, tracer
     else:
         return model, model_fine, optimizer, start
+
+def gather_batch(input, index):
+    b, t, p = index.shape
+    _, _, c = input.shape
+    output = torch.zeros((b, t, p, c), device=input.device)
+
+    for i, (val, idx) in enumerate(zip(input, index)):
+        output[i] = val[idx]
+
+    return output
