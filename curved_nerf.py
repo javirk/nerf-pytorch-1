@@ -11,7 +11,7 @@ from libs.mesh_helpers import *
 import libs.transforms as transforms
 from libs.run_nerf_helpers import *
 from libs.other_helpers import unit_vector
-from libs.tracing_model import EvolutionModel
+from libs.tracing_model import EvolutionModel, IoRModel
 
 from loaders.load_blender import load_blender_data
 
@@ -206,24 +206,18 @@ def create_nerf(args):
                                                                         embeddirs_fn=embeddirs_fn,
                                                                         netchunk=args.netchunk)
 
-    mesh_folder = 'meshes/' + args.mesh_name
-    tr = [transforms.TetraToEdge(remove_tetras=False), transforms.TetraToNeighbors(mesh_folder), transforms.TetraCoordinates()]
+    # mesh_folder = 'meshes/' + args.mesh_name
+    # tr = [transforms.TetraToEdge(remove_tetras=False), transforms.TetraToNeighbors(mesh_folder), transforms.TetraCoordinates()]
 
-    tracer = EvolutionModel(mesh_folder, n_steps=args.N_steps, transforms=tr)
+    ior_model = IoRModel()
+    ior_model.to(device)
+    bounds_box = [(-1, 1), (-1, 1), (-1, 1)]
+
+    tracer = EvolutionModel(ior_model, args.step_size, bounds_box)
     tracer.to(device)
     tracer.train()
 
-    if args.n_index == 'circular':
-        max_tracer = tracer.graph.pos.norm(dim=1).max()
-        min_tracer = tracer.graph.pos.norm(dim=1).min()
-        n_index = - 0.5 * (1-(max_tracer - tracer.graph.pos.norm(dim=1)) / (max_tracer - min_tracer)) + 1.5
-        # n_index = tracer.graph.pos.norm(dim=1)
-    else:
-        raise NotImplementedError()
-
-    tracer.init_vars(n_index)
-
-    grad_vars += list(tracer.parameters())  # This is horrible but the best I know
+    grad_vars += list(tracer.parameters())
 
     # Create optimizer
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
@@ -248,7 +242,6 @@ def create_nerf(args):
         'network_query_fn': network_query_fn,
         'perturb': args.perturb,
         'N_importance': args.N_importance,
-        'sampling_probability': args.sampling_probability,
         'network_fine': model_fine,
         'N_samples': args.N_samples,
         'network_fn': model,
@@ -327,7 +320,6 @@ def render_rays(ray_batch,
                 lindisp=False,
                 perturb=0.,
                 N_importance=0,
-                sampling_probability=0.5,
                 network_fine=None,
                 white_bkgd=False,
                 raw_noise_std=0.,
@@ -480,6 +472,8 @@ def config_parser():
                         help='Curver model path')
     parser.add_argument('--freeze_nerf', action='store_true',
                         help='Freeze the NeRF architecture')
+    parser.add_argument('--step_size', type=float, default=0.01,
+                        help='Step size for the ray marching')
 
     # rendering options
     parser.add_argument("--N_samples", type=int, default=64,
@@ -492,8 +486,6 @@ def config_parser():
                         help='number of additional fine samples per ray')
     parser.add_argument("--perturb", type=float, default=1.,
                         help='set to 0. for no jitter, 1. for jitter')
-    parser.add_argument("--sampling_probability", type=float, default=1.,
-                        help='Points with a probability under sampling_probability will not be considered')
     parser.add_argument("--use_viewdirs", action='store_true',
                         help='use full 5D input instead of 3D')
     parser.add_argument("--i_embed", type=int, default=0,
@@ -722,7 +714,6 @@ def train():
 
         #####  Core optimization loop  #####
         optimizer.zero_grad()
-        render_kwargs_train['tracer'].update_vars()
         rgb, disp, acc, extras = render(H, W, focal, chunk=args.chunk, rays=batch_rays, verbose=i < 10, retraw=True,
                                         **render_kwargs_train)
 
