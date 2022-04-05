@@ -19,6 +19,12 @@ class IoRModel(nn.Module):
         gradient = self.fc_grad(x)
         return n, gradient
 
+class IoRModelTrivial(nn.Module):
+    def __init__(self):
+        super(IoRModelTrivial, self).__init__()
+
+    def forward(self, x):
+        return 1, torch.zeros_like(x)
 
 
 class EvolutionModel(nn.Module):
@@ -135,7 +141,7 @@ if __name__ == '__main__':
 
     bounds_box = [(-1, 1), (-1, 1), (-1, 1)]
 
-    ior_model = IoRModel()
+    ior_model = IoRModelTrivial()
     ior_model.to(device)
     step_size = 0.1
 

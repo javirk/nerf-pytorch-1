@@ -9,7 +9,7 @@ from tqdm import tqdm, trange
 
 from libs.run_nerf_helpers import *
 from libs.other_helpers import unit_vector
-from libs.tracing_model import EvolutionModel, IoRModel
+from libs.tracing_model import EvolutionModel, IoRModel, IoRModelTrivial
 
 from loaders.load_blender import load_blender_data
 
@@ -207,7 +207,7 @@ def create_nerf(args):
     # mesh_folder = 'meshes/' + args.mesh_name
     # tr = [transforms.TetraToEdge(remove_tetras=False), transforms.TetraToNeighbors(mesh_folder), transforms.TetraCoordinates()]
 
-    ior_model = IoRModel()
+    ior_model = IoRModelTrivial()
     ior_model.to(device)
     bounds_box = [(-1, 1), (-1, 1), (-1, 1)]
 
@@ -744,7 +744,7 @@ def train():
                         'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
                         'network_fine_state_dict': render_kwargs_train['network_fine'].state_dict() if args.N_importance > 0 else None,
                         'optimizer_state_dict': optimizer.state_dict(),
-                        # 'curver': render_kwargs_train['curver'].state_dict()
+                        'tracer': render_kwargs_train['tracer'].state_dict()
                         },
                        path)
             print('Saved checkpoints at', path)
