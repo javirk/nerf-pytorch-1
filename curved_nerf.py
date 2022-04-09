@@ -209,7 +209,7 @@ def create_nerf(args):
 
     ior_model = IoRModelTrivial()
     ior_model.to(device)
-    bounds_box = [(-1, 1), (-1, 1), (-1, 1)]
+    bounds_box = [(-1.5, 1.5), (-1.5, 1.5), (-1.5, 1.5)]
 
     tracer = EvolutionModel(ior_model, args.step_size, bounds_box)
     tracer.to(device)
@@ -466,10 +466,6 @@ def config_parser():
                         help='do not reload weights from saved ckpt')
     parser.add_argument("--ft_path", type=str, default=None,
                         help='specific weights npy file to reload for coarse network')
-    parser.add_argument('--c_path', type=str, default='models/lagrangian_straight.pth',
-                        help='Curver model path')
-    parser.add_argument('--freeze_nerf', action='store_true',
-                        help='Freeze the NeRF architecture')
     parser.add_argument('--step_size', type=float, default=0.01,
                         help='Step size for the ray marching')
 

@@ -4,7 +4,6 @@ datadir = ./data/straight
 dataset_type = blender
 previous_training = None
 mesh_name = sphere_coarse
-n_index = circular
 
 no_batching = True
 
@@ -15,7 +14,7 @@ lrate_decay = 500
 N_steps = 40
 
 N_samples = 64  # 64
-N_importance = 64 # 128
+N_importance = 128 # 128
 N_rand = 1024
 perturb = 0
 step_size = 0.01

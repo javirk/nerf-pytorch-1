@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from libs.run_nerf_helpers import gather_batch
 
+
 class IoRModel(nn.Module):
     def __init__(self):
         super(IoRModel, self).__init__()
@@ -18,6 +19,7 @@ class IoRModel(nn.Module):
         n = self.sigmoid(self.fc_n(x)) + 1
         gradient = self.fc_grad(x)
         return n, gradient
+
 
 class IoRModelTrivial(nn.Module):
     def __init__(self):
@@ -73,7 +75,6 @@ class EvolutionModel(nn.Module):
 
         return final_coords
 
-
     # plot_tetra(self.graph, tetra_idx[:, None], rp[:, None, :], m[:, None, :])
     def evolve(self, x0, v0):
         x = x0.clone()
@@ -112,7 +113,7 @@ class EvolutionModel(nn.Module):
             v_hist.append(v)
             distances.append(d)
 
-            i+=1
+            i += 1
 
         x_hist = torch.stack(x_hist, dim=1)
         v_hist = torch.stack(v_hist, dim=1)
