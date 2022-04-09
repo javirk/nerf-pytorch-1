@@ -185,19 +185,13 @@ def create_nerf(args):
     model = NeRF(D=args.netdepth, W=args.netwidth, input_ch=input_ch, output_ch=output_ch, skips=skips,
                  input_ch_views=input_ch_views, use_viewdirs=args.use_viewdirs).to(device)
 
-    if not args.freeze_nerf:
-        grad_vars = list(model.parameters())
-    else:
-        model.requires_grad_(False)
+    grad_vars = list(model.parameters())
 
     model_fine = None
     if args.N_importance > 0:
         model_fine = NeRF(D=args.netdepth_fine, W=args.netwidth_fine, input_ch=input_ch, output_ch=output_ch,
                           skips=skips, input_ch_views=input_ch_views, use_viewdirs=args.use_viewdirs).to(device)
-        if not args.freeze_nerf:
-            grad_vars += list(model_fine.parameters())
-        else:
-            model_fine.requires_grad_(False)
+        grad_vars += list(model_fine.parameters())
 
     network_query_fn = lambda inputs, viewdirs, network_fn: run_network(inputs, viewdirs, network_fn,
                                                                         embed_fn=embed_fn,
