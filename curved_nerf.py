@@ -371,8 +371,9 @@ def render_rays(ray_batch,
 
         z_vals = lower + (upper - lower) * t_rand
 
-    pts = tracer(rays_o, rays_d, z_vals.unsqueeze(-1))
-    assert not pts.isnan().any()
+    # pts = tracer(rays_o, rays_d, z_vals.unsqueeze(-1))
+    # assert not pts.isnan().any()
+    pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]  # [N_rays, N_samples + N_importance, 3]
     raw = network_query_fn(pts, viewdirs, network_fn)
     rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, white_bkgd,
                                                                  pytest=pytest)
@@ -386,10 +387,9 @@ def render_rays(ray_batch,
 
         t_vals, _ = torch.sort(torch.cat([z_vals, t_samples], -1), -1)
         z_vals = near * (1. - t_vals) + far * t_vals
-        pts = tracer(rays_o, rays_d, z_vals.unsqueeze(-1))
-        assert not pts.isnan().any()
-        # pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :,
-        #                                                     None]  # [N_rays, N_samples + N_importance, 3]
+        # pts = tracer(rays_o, rays_d, z_vals.unsqueeze(-1))
+        # assert not pts.isnan().any()
+        pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]  # [N_rays, N_samples + N_importance, 3]
         z_vals = z_vals.squeeze(-1)
         run_fn = network_fn if network_fine is None else network_fine
         raw = network_query_fn(pts, viewdirs, run_fn)
