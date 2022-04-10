@@ -205,7 +205,8 @@ def create_nerf(args):
     ior_model.to(device)
     bounds_box = [(-1.5, 1.5), (-1.5, 1.5), (-1.5, 1.5)]
 
-    tracer = EvolutionModel(ior_model, args.step_size, bounds_box)
+    # tracer = EvolutionModel(ior_model, args.step_size, bounds_box)
+    tracer = IoRModelTrivial()
     tracer.to(device)
     tracer.train()
 

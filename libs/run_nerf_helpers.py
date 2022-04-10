@@ -281,7 +281,7 @@ def load_ckpt(optimizer, model, model_fine, args, basedir, expname, curved=False
     if curved:
         return model, model_fine, optimizer, start, tracer
     else:
-        return model, model_fine, optimizer, start
+        return model, model_fine, optimizer, start, None
 
 def gather_batch(input, index):
     b, t, p = index.shape
