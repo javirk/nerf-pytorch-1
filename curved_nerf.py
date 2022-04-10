@@ -215,7 +215,8 @@ def create_nerf(args):
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
 
     basedir = args.basedir
-    if 'curved' in args.datadir:
+    curved = 'curved' in args.datadir
+    if curved:
         expname = args.expname + '_curved'
     else:
         expname = args.expname + '_straight'
@@ -224,7 +225,7 @@ def create_nerf(args):
 
     # model, model_fine, optimizer, start = load_ckpt(optimizer, model, model_fine, args, basedir, args.previous_training)
     model, model_fine, optimizer, start, curver = load_ckpt(optimizer, model, model_fine, args, basedir, expname,
-                                                            curved=True, tracer=tracer)
+                                                            curved=curved, tracer=tracer)
 
     # Load checkpoints from previous curved rays
 
