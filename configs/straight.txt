@@ -3,7 +3,6 @@ basedir = ./logs
 datadir = ./data/straight
 dataset_type = blender
 previous_training = None
-mesh_name = sphere_coarse
 
 no_batching = True
 
@@ -16,7 +15,6 @@ N_steps = 40
 N_samples = 64  # 64
 N_importance = 128 # 128
 N_rand = 1024
-perturb = 0
 step_size = 0.01
 
 precrop_iters = 500
